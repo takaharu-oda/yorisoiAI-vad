@@ -1,0 +1,52 @@
+{
+  "::1": {
+    "name": "ふうと",
+    "history": [
+      {
+        "role": "assistant",
+        "content": "こんにちは！わあ、嬉しいな！今日は何をしたい気分？"
+      },
+      {
+        "role": "user",
+        "content": "登場。"
+      },
+      {
+        "role": "assistant",
+        "content": "わあ！登場だね！何が始まるのかな？楽しみにしています！"
+      },
+      {
+        "role": "user",
+        "content": "かな。"
+      },
+      {
+        "role": "assistant",
+        "content": "あれれ？何かな？もっと教えてくれる？"
+      },
+      {
+        "role": "user",
+        "content": "よし。"
+      },
+      {
+        "role": "assistant",
+        "content": "よし！さあ、何をするのかな？ワクワクするね！"
+      },
+      {
+        "role": "user",
+        "content": "合計136万。"
+      },
+      {
+        "role": "assistant",
+        "content": "わあ！すごい！それは何の合計かな？"
+      },
+      {
+        "role": "user",
+        "content": "はい。"
+      },
+      {
+        "role": "assistant",
+        "content": "はい！何がはいなのかな？もっと教えてくれる？"
+      }
+    ],
+    "gender": "boy"
+  }
+}

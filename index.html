@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>よりそいAI（バランス版）</h2>
+
+<script>
+function getParam(name) {
+  const params = new URLSearchParams(window.location.search);
+  return params.get(name);
+}
+
+let audioContext;
+let processor;
+let input;
+let recording = false;
+let audioData = [];
+let isPlaying = false;
+
+let silenceCount = 0;
+let startTime = 0;
+
+// 🔥 調整ポイント
+const SILENCE_THRESHOLD = 0.015;
+const SILENCE_LIMIT = 18;
+const MIN_RECORD_TIME = 1500;
+
+async function init() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  audioContext = new AudioContext();
+  input = audioContext.createMediaStreamSource(stream);
+
+  processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+  processor.onaudioprocess = function(e) {
+    if (!recording || isPlaying) return;
+
+    const inputData = e.inputBuffer.getChannelData(0);
+    audioData.push(new Float32Array(inputData));
+
+    let volume = 0;
+    for (let i = 0; i < inputData.length; i++) {
+      volume += Math.abs(inputData[i]);
+    }
+    volume /= inputData.length;
+
+    if (volume < SILENCE_THRESHOLD) {
+      silenceCount++;
+    } else {
+      silenceCount = 0;
+    }
+
+    // 🔥 最低録音時間追加
+    if (
+      silenceCount > SILENCE_LIMIT &&
+      Date.now() - startTime > MIN_RECORD_TIME
+    ) {
+      stopRecording();
+    }
+  };
+
+  input.connect(processor);
+  processor.connect(audioContext.destination);
+
+  loop();
+}
+
+function loop() {
+  setInterval(() => {
+    if (isPlaying) return;
+
+    recording = true;
+    audioData = [];
+    silenceCount = 0;
+    startTime = Date.now();
+
+    console.log("録音開始");
+
+  }, 3000);
+}
+
+async function stopRecording() {
+  if (!recording) return;
+
+  recording = false;
+
+  console.log("送信");
+
+  const wavBlob = encodeWAV(audioData, audioContext.sampleRate);
+
+  const formData = new FormData();
+  formData.append("audio", wavBlob, "voice.wav");
+  formData.append("name", getParam("name"));
+  formData.append("gender", getParam("gender"));
+
+  const res = await fetch("/voice", {
+    method: "POST",
+    body: formData
+  });
+
+  if (res.status === 204) return;
+
+  const audio = new Audio(URL.createObjectURL(await res.blob()));
+
+  isPlaying = true;
+  audio.onended = () => setTimeout(() => isPlaying = false, 500);
+
+  audio.play();
+}
+
+function encodeWAV(buffers, sampleRate) {
+  let length = buffers.reduce((a,b)=>a+b.length,0);
+  let buffer = new ArrayBuffer(44 + length * 2);
+  let view = new DataView(buffer);
+
+  function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + length * 2, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, length * 2, true);
+
+  let offset = 44;
+  buffers.forEach(buf => {
+    for (let i = 0; i < buf.length; i++, offset += 2) {
+      let s = Math.max(-1, Math.min(1, buf[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+  });
+
+  return new Blob([view], { type: "audio/wav" });
+}
+
+init();
+</script>
+
+</body>
+</html>
