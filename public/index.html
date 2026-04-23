@@ -110,7 +110,7 @@ function detectVoice() {
 
   console.log("volume:", volume);
 
-  const threshold = 5;
+  const threshold = 0.3;
 
   if (volume > threshold) {
     silenceStart = null;
