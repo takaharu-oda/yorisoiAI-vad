@@ -37,20 +37,27 @@ document.getElementById("start").onclick = async () => {
     formData.append("name", "ふうと");
     formData.append("gender", "boy");
 
+    console.log("送信中...");
+
     const res = await fetch("/api/voice", {
       method: "POST",
       body: formData
     });
 
     const data = await res.json();
+
+    console.log("返答:", data.reply);
     alert(data.reply);
   };
 
   mediaRecorder.start();
 
+  console.log("録音開始");
+
   setTimeout(() => {
     mediaRecorder.stop();
-  }, 3000);
+    console.log("録音停止");
+  }, 4000); // ←ここ重要（4秒）
 };
 </script>
 

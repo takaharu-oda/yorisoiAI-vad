@@ -8,7 +8,7 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ===== メモリ（簡易）=====
+// ===== メモリ =====
 let memory = {};
 
 // ===== API =====
@@ -35,13 +35,13 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const suffix = user.gender === "boy" ? "くん" : "ちゃん";
 
-    // ===== Whisper =====
+    // ===== 音声→テキスト（Whisper安定版）=====
     const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
       contentType: "audio/webm"
     });
-    form.append("model", "gpt-4o-mini-transcribe");
+    form.append("model", "whisper-1");
 
     const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
@@ -52,12 +52,14 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     });
 
     const sttData = await sttRes.json();
-    const text = sttData.text || "";
+    console.log("STT結果:", sttData);
 
+    const text = sttData.text || "";
     console.log("認識:", text);
 
+    // 無音対策
     if (!text.trim()) {
-      return res.json({ reply: "" });
+      return res.json({ reply: "ごめんね、聞こえなかったよ。もう一回話してくれる？" });
     }
 
     // ===== 履歴 =====
@@ -104,14 +106,14 @@ ${nameCall ? `・「${nameCall}」と呼ぶ` : ""}
     res.json({ reply });
 
   } catch (e) {
-    console.error(e);
+    console.error("エラー:", e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// ===== 静的 =====
+// ===== 静的ファイル =====
 app.use(express.static("public"));
 
-// ===== ポート =====
+// ===== 起動 =====
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log("server running"));
+app.listen(PORT, () => console.log("server running on " + PORT));
