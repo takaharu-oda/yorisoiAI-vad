@@ -8,10 +8,8 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ===== メモリ =====
 let memory = {};
 
-// ===== API =====
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
     if (!req.file) {
@@ -29,9 +27,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     }
 
     const user = memory[userId];
-
-    if (req.body.name) user.name = req.body.name;
-    if (req.body.gender) user.gender = req.body.gender;
 
     const suffix = user.gender === "boy" ? "くん" : "ちゃん";
 
@@ -57,15 +52,30 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const text = sttData.text || "";
 
     if (!text.trim()) {
-      return res.json({ reply: "ごめんね、聞こえなかったよ" });
+      const fallback = "ごめんね、もう一回話してくれる？";
+
+      const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini-tts",
+          voice: "alloy",
+          input: fallback
+        })
+      });
+
+      const audioBuffer = await ttsRes.arrayBuffer();
+      res.set("Content-Type", "audio/mpeg");
+      return res.send(Buffer.from(audioBuffer));
     }
 
-    // ===== 履歴 =====
     user.history.push({ role: "user", content: text });
     user.history = user.history.slice(-10);
 
-    const callName = Math.random() < 0.4;
-    const nameCall = callName ? `${user.name}${suffix}` : "";
+    const callName = Math.random() < 0.4 ? `${user.name}${suffix}` : "";
 
     // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -81,12 +91,10 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
             role: "system",
             content: `
 あなたはやさしいぬいぐるみです。
-
-・1文で話す
-・最大でも2文まで
-・短くする（超重要）
-・子供に話しかける
-${nameCall ? `・「${nameCall}」と呼ぶ` : ""}
+・短く話す
+・1〜2文
+・子供向け
+${callName ? `・「${callName}」と呼ぶ` : ""}
 `
           },
           ...user.history
@@ -101,7 +109,7 @@ ${nameCall ? `・「${nameCall}」と呼ぶ` : ""}
 
     user.history.push({ role: "assistant", content: reply });
 
-    // ===== 🔥 TTS =====
+    // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -115,18 +123,19 @@ ${nameCall ? `・「${nameCall}」と呼ぶ` : ""}
       })
     });
 
+    console.log("TTS status:", ttsRes.status);
+
     const audioBuffer = await ttsRes.arrayBuffer();
 
     res.set("Content-Type", "audio/mpeg");
     res.send(Buffer.from(audioBuffer));
 
   } catch (e) {
-    console.error(e);
+    console.error("エラー:", e);
     res.status(500).send("error");
   }
 });
 
-// ===== 静的 =====
 app.use(express.static("public"));
 
 const PORT = process.env.PORT || 3001;
