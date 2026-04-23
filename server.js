@@ -12,9 +12,7 @@ let memory = {};
 
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).send("no audio");
-    }
+    if (!req.file) return res.status(400).send("no audio");
 
     const userId = req.body.userId || "default";
 
@@ -27,7 +25,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     }
 
     const user = memory[userId];
-
     const suffix = user.gender === "boy" ? "くん" : "ちゃん";
 
     // ===== STT =====
@@ -52,7 +49,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const text = sttData.text || "";
 
     if (!text.trim()) {
-      const fallback = "ごめんね、もう一回話してくれる？";
+      const fallback = "もう一回話してくれる？";
 
       const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
@@ -67,9 +64,9 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
         })
       });
 
-      const audioBuffer = await ttsRes.arrayBuffer();
+      const buf = await ttsRes.arrayBuffer();
       res.set("Content-Type", "audio/mpeg");
-      return res.send(Buffer.from(audioBuffer));
+      return res.send(Buffer.from(buf));
     }
 
     user.history.push({ role: "user", content: text });
@@ -131,7 +128,7 @@ ${callName ? `・「${callName}」と呼ぶ` : ""}
     res.send(Buffer.from(audioBuffer));
 
   } catch (e) {
-    console.error("エラー:", e);
+    console.error(e);
     res.status(500).send("error");
   }
 });
