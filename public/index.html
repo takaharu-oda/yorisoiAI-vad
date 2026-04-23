@@ -38,14 +38,22 @@ document.getElementById("start").onclick = async () => {
 
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("✅ マイク取得OK");
   } catch (e) {
-    alert("マイク許可が必要です");
+    console.log("❌ マイク取得失敗", e);
+    alert("マイク許可してください");
     return;
   }
 
-  // 🔥 AudioContext生成（重要）
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  await audioContext.resume();
+
+  console.log("初期状態:", audioContext.state);
+
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+
+  console.log("再開後:", audioContext.state);
 
   const source = audioContext.createMediaStreamSource(micStream);
 
@@ -53,9 +61,6 @@ document.getElementById("start").onclick = async () => {
   analyser.fftSize = 2048;
 
   source.connect(analyser);
-
-  // 🔥 これないと動かない環境あり
-  analyser.connect(audioContext.destination);
 
   console.log("🚀 VAD開始");
 
@@ -87,6 +92,8 @@ function detectVoice() {
 
   if (!isActive) return;
 
+  console.log("detect回ってる");
+
   if (isPlaying || isProcessing) {
     requestAnimationFrame(detectVoice);
     return;
@@ -101,10 +108,8 @@ function detectVoice() {
   }
   volume = volume / data.length;
 
-  // 🔥 デバッグ
   console.log("volume:", volume);
 
-  // 🔥 感度かなり下げる
   const threshold = 5;
 
   if (volume > threshold) {
@@ -171,8 +176,6 @@ async function sendAudio() {
   const formData = new FormData();
   formData.append("audio", blob);
   formData.append("userId", getUserId());
-  formData.append("name", "ふうと");
-  formData.append("gender", "boy");
 
   console.log("📡 送信");
 
@@ -182,8 +185,6 @@ async function sendAudio() {
   });
 
   const audioBlob = await res.blob();
-
-  if (audioPlayer) audioPlayer.pause();
 
   const url = URL.createObjectURL(audioBlob);
   audioPlayer = new Audio(url);
