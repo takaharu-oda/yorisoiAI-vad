@@ -1,4 +1,13 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>よりそいAI（音声版）</h2>
+<button id="start">録音</button>
+
 <script>
+window.onload = () => {
+
 let mediaRecorder;
 let chunks = [];
 let audioPlayer = null;
@@ -31,8 +40,6 @@ document.getElementById("start").onclick = async () => {
     formData.append("name", "ふうと");
     formData.append("gender", "boy");
 
-    console.log("送信中...");
-
     const res = await fetch("/api/voice", {
       method: "POST",
       body: formData
@@ -40,13 +47,9 @@ document.getElementById("start").onclick = async () => {
 
     const audioBlob = await res.blob();
 
-    // 🔥 ここが重要
-    if (audioPlayer) {
-      audioPlayer.pause();
-    }
+    if (audioPlayer) audioPlayer.pause();
 
     const url = URL.createObjectURL(audioBlob);
-
     audioPlayer = new Audio(url);
 
     try {
@@ -58,11 +61,14 @@ document.getElementById("start").onclick = async () => {
   };
 
   mediaRecorder.start();
-  console.log("録音開始");
 
   setTimeout(() => {
     mediaRecorder.stop();
-    console.log("録音停止");
   }, 5000);
 };
+
+};
 </script>
+
+</body>
+</html>
