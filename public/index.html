@@ -19,7 +19,7 @@ let silenceStart = null;
 let audioPlayer = null;
 let isPlaying = false;
 let isProcessing = false;
-let isActive = false; // 👈 会話ON/OFF
+let isActive = false;
 
 function getUserId() {
   let id = localStorage.getItem("userId");
@@ -40,12 +40,18 @@ document.getElementById("start").onclick = async () => {
   micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   audioContext = new AudioContext();
+
+  // 🔥 これ超重要（これがないと動かない場合あり）
+  await audioContext.resume();
+
   const source = audioContext.createMediaStreamSource(micStream);
 
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 2048;
 
   source.connect(analyser);
+
+  console.log("🚀 VAD開始");
 
   detectVoice();
 };
@@ -75,6 +81,7 @@ function detectVoice() {
 
   if (!isActive) return;
 
+  // 🔥 AI再生中・通信中は無視
   if (isPlaying || isProcessing) {
     requestAnimationFrame(detectVoice);
     return;
@@ -145,6 +152,7 @@ async function sendAudio() {
 
   const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
 
+  // 無音スキップ
   if (blob.size < 2000) {
     console.log("無音スキップ");
     return;
