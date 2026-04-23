@@ -2,8 +2,10 @@
 <html>
 <body>
 
-<h2>よりそいAI（VAD版）</h2>
-<button id="start">スタート</button>
+<h2>よりそいAI（VAD）</h2>
+
+<button id="start">会話スタート</button>
+<button id="stop">会話ストップ</button>
 
 <script>
 let audioContext;
@@ -11,9 +13,13 @@ let analyser;
 let micStream;
 let mediaRecorder;
 let chunks = [];
+
 let recording = false;
 let silenceStart = null;
 let audioPlayer = null;
+let isPlaying = false;
+let isProcessing = false;
+let isActive = false; // 👈 会話ON/OFF
 
 function getUserId() {
   let id = localStorage.getItem("userId");
@@ -24,7 +30,12 @@ function getUserId() {
   return id;
 }
 
+// ===== スタート =====
 document.getElementById("start").onclick = async () => {
+
+  if (isActive) return;
+
+  isActive = true;
 
   micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -39,7 +50,36 @@ document.getElementById("start").onclick = async () => {
   detectVoice();
 };
 
+// ===== ストップ =====
+document.getElementById("stop").onclick = () => {
+
+  isActive = false;
+
+  if (mediaRecorder && recording) {
+    mediaRecorder.stop();
+  }
+
+  if (audioPlayer) {
+    audioPlayer.pause();
+  }
+
+  if (micStream) {
+    micStream.getTracks().forEach(track => track.stop());
+  }
+
+  console.log("🛑 会話停止");
+};
+
+// ===== VAD =====
 function detectVoice() {
+
+  if (!isActive) return;
+
+  if (isPlaying || isProcessing) {
+    requestAnimationFrame(detectVoice);
+    return;
+  }
+
   const data = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(data);
 
@@ -49,11 +89,9 @@ function detectVoice() {
   }
   volume = volume / data.length;
 
-  // 👇しきい値（調整OK）
-  const threshold = 10;
+  const threshold = 20;
 
   if (volume > threshold) {
-    // 🎤 話してる
     silenceStart = null;
 
     if (!recording) {
@@ -61,13 +99,11 @@ function detectVoice() {
     }
 
   } else {
-    // 🤫 無音
     if (recording) {
       if (!silenceStart) {
         silenceStart = Date.now();
       } else {
-        // 1秒無音で停止
-        if (Date.now() - silenceStart > 1000) {
+        if (Date.now() - silenceStart > 1500) {
           stopRecording();
         }
       }
@@ -77,6 +113,7 @@ function detectVoice() {
   requestAnimationFrame(detectVoice);
 }
 
+// ===== 録音開始 =====
 function startRecording() {
   console.log("🎤 録音開始");
 
@@ -96,14 +133,24 @@ function startRecording() {
   mediaRecorder.start();
 }
 
-async function stopRecording() {
+// ===== 録音停止 =====
+function stopRecording() {
   console.log("⏹ 録音停止");
   recording = false;
   mediaRecorder.stop();
 }
 
+// ===== 送信 =====
 async function sendAudio() {
+
   const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
+
+  if (blob.size < 2000) {
+    console.log("無音スキップ");
+    return;
+  }
+
+  isProcessing = true;
 
   const formData = new FormData();
   formData.append("audio", blob);
@@ -125,11 +172,21 @@ async function sendAudio() {
   const url = URL.createObjectURL(audioBlob);
   audioPlayer = new Audio(url);
 
+  isPlaying = true;
+
+  audioPlayer.onended = () => {
+    isPlaying = false;
+    isProcessing = false;
+    console.log("再生終了");
+  };
+
   try {
     await audioPlayer.play();
     console.log("🔊 再生");
   } catch (e) {
     console.log("再生エラー", e);
+    isPlaying = false;
+    isProcessing = false;
   }
 }
 </script>
