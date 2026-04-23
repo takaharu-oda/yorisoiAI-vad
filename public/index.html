@@ -34,14 +34,17 @@ function getUserId() {
 document.getElementById("start").onclick = async () => {
 
   if (isActive) return;
-
   isActive = true;
 
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    alert("マイク許可が必要です");
+    return;
+  }
 
-  audioContext = new AudioContext();
-
-  // 🔥 これ超重要（これがないと動かない場合あり）
+  // 🔥 AudioContext生成（重要）
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
   await audioContext.resume();
 
   const source = audioContext.createMediaStreamSource(micStream);
@@ -50,6 +53,9 @@ document.getElementById("start").onclick = async () => {
   analyser.fftSize = 2048;
 
   source.connect(analyser);
+
+  // 🔥 これないと動かない環境あり
+  analyser.connect(audioContext.destination);
 
   console.log("🚀 VAD開始");
 
@@ -81,7 +87,6 @@ function detectVoice() {
 
   if (!isActive) return;
 
-  // 🔥 AI再生中・通信中は無視
   if (isPlaying || isProcessing) {
     requestAnimationFrame(detectVoice);
     return;
@@ -96,7 +101,11 @@ function detectVoice() {
   }
   volume = volume / data.length;
 
-  const threshold = 20;
+  // 🔥 デバッグ
+  console.log("volume:", volume);
+
+  // 🔥 感度かなり下げる
+  const threshold = 5;
 
   if (volume > threshold) {
     silenceStart = null;
@@ -152,7 +161,6 @@ async function sendAudio() {
 
   const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
 
-  // 無音スキップ
   if (blob.size < 2000) {
     console.log("無音スキップ");
     return;
