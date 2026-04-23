@@ -2,14 +2,17 @@
 <html>
 <body>
 
-<h2>よりそいAI（音声版）</h2>
-<button id="start">録音</button>
+<h2>よりそいAI（VAD版）</h2>
+<button id="start">スタート</button>
 
 <script>
-window.onload = () => {
-
+let audioContext;
+let analyser;
+let micStream;
 let mediaRecorder;
 let chunks = [];
+let recording = false;
+let silenceStart = null;
 let audioPlayer = null;
 
 function getUserId() {
@@ -23,65 +26,112 @@ function getUserId() {
 
 document.getElementById("start").onclick = async () => {
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  // 🔥 ここ重要（フォーマット安定）
-  mediaRecorder = new MediaRecorder(stream, {
+  audioContext = new AudioContext();
+  const source = audioContext.createMediaStreamSource(micStream);
+
+  analyser = audioContext.createAnalyser();
+  analyser.fftSize = 2048;
+
+  source.connect(analyser);
+
+  detectVoice();
+};
+
+function detectVoice() {
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+
+  let volume = 0;
+  for (let i = 0; i < data.length; i++) {
+    volume += Math.abs(data[i] - 128);
+  }
+  volume = volume / data.length;
+
+  // 👇しきい値（調整OK）
+  const threshold = 10;
+
+  if (volume > threshold) {
+    // 🎤 話してる
+    silenceStart = null;
+
+    if (!recording) {
+      startRecording();
+    }
+
+  } else {
+    // 🤫 無音
+    if (recording) {
+      if (!silenceStart) {
+        silenceStart = Date.now();
+      } else {
+        // 1秒無音で停止
+        if (Date.now() - silenceStart > 1000) {
+          stopRecording();
+        }
+      }
+    }
+  }
+
+  requestAnimationFrame(detectVoice);
+}
+
+function startRecording() {
+  console.log("🎤 録音開始");
+
+  mediaRecorder = new MediaRecorder(micStream, {
     mimeType: "audio/webm;codecs=opus"
   });
 
   chunks = [];
+  recording = true;
 
   mediaRecorder.ondataavailable = e => {
     if (e.data.size > 0) chunks.push(e.data);
   };
 
-  mediaRecorder.onstop = async () => {
-    const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
+  mediaRecorder.onstop = sendAudio;
 
-    const formData = new FormData();
-    formData.append("audio", blob);
-    formData.append("userId", getUserId());
-    formData.append("name", "ふうと");
-    formData.append("gender", "boy");
+  mediaRecorder.start();
+}
 
-    console.log("送信中...");
+async function stopRecording() {
+  console.log("⏹ 録音停止");
+  recording = false;
+  mediaRecorder.stop();
+}
 
-    const res = await fetch("/api/voice", {
-      method: "POST",
-      body: formData
-    });
+async function sendAudio() {
+  const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
 
-    const audioBlob = await res.blob();
+  const formData = new FormData();
+  formData.append("audio", blob);
+  formData.append("userId", getUserId());
+  formData.append("name", "ふうと");
+  formData.append("gender", "boy");
 
-    if (audioPlayer) audioPlayer.pause();
+  console.log("📡 送信");
 
-    const url = URL.createObjectURL(audioBlob);
+  const res = await fetch("/api/voice", {
+    method: "POST",
+    body: formData
+  });
 
-    audioPlayer = new Audio(url);
+  const audioBlob = await res.blob();
 
-    try {
-      await audioPlayer.play();
-      console.log("再生成功");
-    } catch (e) {
-      console.log("再生失敗", e);
-    }
-  };
+  if (audioPlayer) audioPlayer.pause();
 
-  // 🔥 マイク安定待ち
-  setTimeout(() => {
-    mediaRecorder.start();
-    console.log("録音開始");
-  }, 200);
+  const url = URL.createObjectURL(audioBlob);
+  audioPlayer = new Audio(url);
 
-  // 🔥 少し長めに
-  setTimeout(() => {
-    mediaRecorder.stop();
-    console.log("録音停止");
-  }, 6000);
-};
-
-};
+  try {
+    await audioPlayer.play();
+    console.log("🔊 再生");
+  } catch (e) {
+    console.log("再生エラー", e);
+  }
+}
 </script>
 
 </body>
