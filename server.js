@@ -35,7 +35,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const suffix = user.gender === "boy" ? "くん" : "ちゃん";
 
-    // ===== 音声→テキスト（Whisper安定版）=====
+    // ===== STT =====
     const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
@@ -52,14 +52,12 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     });
 
     const sttData = await sttRes.json();
-    console.log("STT結果:", sttData);
+    console.log("認識:", sttData);
 
     const text = sttData.text || "";
-    console.log("認識:", text);
 
-    // 無音対策
     if (!text.trim()) {
-      return res.json({ reply: "ごめんね、聞こえなかったよ。もう一回話してくれる？" });
+      return res.json({ reply: "ごめんね、聞こえなかったよ" });
     }
 
     // ===== 履歴 =====
@@ -103,17 +101,33 @@ ${nameCall ? `・「${nameCall}」と呼ぶ` : ""}
 
     user.history.push({ role: "assistant", content: reply });
 
-    res.json({ reply });
+    // ===== 🔥 TTS =====
+    const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini-tts",
+        voice: "alloy",
+        input: reply
+      })
+    });
+
+    const audioBuffer = await ttsRes.arrayBuffer();
+
+    res.set("Content-Type", "audio/mpeg");
+    res.send(Buffer.from(audioBuffer));
 
   } catch (e) {
-    console.error("エラー:", e);
-    res.status(500).json({ error: e.message });
+    console.error(e);
+    res.status(500).send("error");
   }
 });
 
-// ===== 静的ファイル =====
+// ===== 静的 =====
 app.use(express.static("public"));
 
-// ===== 起動 =====
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log("server running on " + PORT));
+app.listen(PORT, () => console.log("server running"));

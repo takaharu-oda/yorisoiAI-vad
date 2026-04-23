@@ -2,7 +2,7 @@
 <html>
 <body>
 
-<h2>よりそいAI（テスト）</h2>
+<h2>よりそいAI（音声版）</h2>
 <button id="start">録音</button>
 
 <script>
@@ -44,20 +44,20 @@ document.getElementById("start").onclick = async () => {
       body: formData
     });
 
-    const data = await res.json();
+    const audioBlob = await res.blob();
+    const url = URL.createObjectURL(audioBlob);
 
-    console.log("返答:", data.reply);
-    alert(data.reply);
+    const audio = new Audio(url);
+    audio.play();
   };
 
   mediaRecorder.start();
-
   console.log("録音開始");
 
   setTimeout(() => {
     mediaRecorder.stop();
     console.log("録音停止");
-  }, 4000); // ←ここ重要（4秒）
+  }, 4000);
 };
 </script>
 
