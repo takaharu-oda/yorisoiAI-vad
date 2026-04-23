@@ -40,20 +40,12 @@ document.getElementById("start").onclick = async () => {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     console.log("✅ マイク取得OK");
   } catch (e) {
-    console.log("❌ マイク取得失敗", e);
     alert("マイク許可してください");
     return;
   }
 
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
-  console.log("初期状態:", audioContext.state);
-
-  if (audioContext.state === "suspended") {
-    await audioContext.resume();
-  }
-
-  console.log("再開後:", audioContext.state);
+  await audioContext.resume();
 
   const source = audioContext.createMediaStreamSource(micStream);
 
@@ -92,8 +84,6 @@ function detectVoice() {
 
   if (!isActive) return;
 
-  console.log("detect回ってる");
-
   if (isPlaying || isProcessing) {
     requestAnimationFrame(detectVoice);
     return;
@@ -102,15 +92,17 @@ function detectVoice() {
   const data = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(data);
 
-  let volume = 0;
+  // 🔥 RMS音量計算（ここが重要）
+  let sum = 0;
   for (let i = 0; i < data.length; i++) {
-    volume += Math.abs(data[i] - 128);
+    let v = (data[i] - 128) / 128;
+    sum += v * v;
   }
-  volume = volume / data.length;
+  let volume = Math.sqrt(sum / data.length);
 
   console.log("volume:", volume);
 
-  const threshold = 0.3;
+  const threshold = 0.05;
 
   if (volume > threshold) {
     silenceStart = null;
@@ -124,7 +116,7 @@ function detectVoice() {
       if (!silenceStart) {
         silenceStart = Date.now();
       } else {
-        if (Date.now() - silenceStart > 1500) {
+        if (Date.now() - silenceStart > 1200) {
           stopRecording();
         }
       }
@@ -194,7 +186,7 @@ async function sendAudio() {
   audioPlayer.onended = () => {
     isPlaying = false;
     isProcessing = false;
-    console.log("再生終了");
+    console.log("🔊 再生終了");
   };
 
   try {
