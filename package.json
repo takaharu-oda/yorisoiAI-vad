@@ -1,7 +1,6 @@
 {
   "name": "yorisoiai",
   "version": "1.0.0",
-  "description": "voice ai",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

@@ -8,47 +8,47 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ===== メモリ（簡易） =====
-let userMemory = {
-  name: null,
-  history: []
-};
+// ===== メモリ（簡易）=====
+let memory = {};
 
-// ===== 名前取得（URL対応） =====
-app.use((req, res, next) => {
-  const name = req.query.name;
-  if (name) {
-    userMemory.name = name;
-  }
-  next();
-});
-
-// ===== 静的ファイル =====
-app.use(express.static("public"));
-
-// ===== 音声受信 =====
+// ===== API =====
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).send("音声なし");
+      return res.status(400).send("no audio");
     }
 
-    console.log("リクエスト来た");
+    const userId = req.body.userId || "default";
 
-    // ===== Whisper（音声→テキスト）=====
-    const formData = new FormData();
-    formData.append("file", req.file.buffer, {
+    if (!memory[userId]) {
+      memory[userId] = {
+        name: req.body.name || "おともだち",
+        gender: req.body.gender || "girl",
+        history: []
+      };
+    }
+
+    const user = memory[userId];
+
+    if (req.body.name) user.name = req.body.name;
+    if (req.body.gender) user.gender = req.body.gender;
+
+    const suffix = user.gender === "boy" ? "くん" : "ちゃん";
+
+    // ===== Whisper =====
+    const form = new FormData();
+    form.append("file", req.file.buffer, {
       filename: "audio.webm",
       contentType: "audio/webm"
     });
-    formData.append("model", "gpt-4o-mini-transcribe");
+    form.append("model", "gpt-4o-mini-transcribe");
 
     const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`
       },
-      body: formData
+      body: form
     });
 
     const sttData = await sttRes.json();
@@ -56,49 +56,40 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     console.log("認識:", text);
 
-    if (!text || text.trim() === "") {
-      console.log("無音スキップ");
-      return res.send({ reply: "" });
+    if (!text.trim()) {
+      return res.json({ reply: "" });
     }
 
-    // ===== 名前処理 =====
-    const name = userMemory.name;
-    const isBoy = name && (name.endsWith("くん") || name.endsWith("君"));
+    // ===== 履歴 =====
+    user.history.push({ role: "user", content: text });
+    user.history = user.history.slice(-10);
 
-    const callName = name
-      ? (isBoy ? `${name}` : `${name}ちゃん`)
-      : "";
-
-    const useName = Math.random() < 0.4;
-
-    // ===== 会話履歴追加 =====
-    userMemory.history.push({ role: "user", content: text });
-    userMemory.history = userMemory.history.slice(-6);
+    const callName = Math.random() < 0.4;
+    const nameCall = callName ? `${user.name}${suffix}` : "";
 
     // ===== GPT =====
-    const prompt = `
+    const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `
 あなたはやさしいぬいぐるみです。
 
 ・1文で話す
 ・最大でも2文まで
 ・短くする（超重要）
-・説明しすぎない
 ・子供に話しかける
-
-${useName && callName ? `・たまに「${callName}」と呼ぶ` : ""}
-`;
-
-    const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: prompt },
-          ...userMemory.history
+${nameCall ? `・「${nameCall}」と呼ぶ` : ""}
+`
+          },
+          ...user.history
         ]
       })
     });
@@ -108,20 +99,19 @@ ${useName && callName ? `・たまに「${callName}」と呼ぶ` : ""}
 
     console.log("返答:", reply);
 
-    // ===== 履歴保存 =====
-    userMemory.history.push({ role: "assistant", content: reply });
+    user.history.push({ role: "assistant", content: reply });
 
-    res.send({ reply });
+    res.json({ reply });
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("エラー");
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
   }
 });
 
-// ===== ポート（超重要）=====
-const PORT = process.env.PORT || 3001;
+// ===== 静的 =====
+app.use(express.static("public"));
 
-app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
-});
+// ===== ポート =====
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log("server running"));
