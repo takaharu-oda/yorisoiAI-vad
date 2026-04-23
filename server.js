@@ -1,137 +1,127 @@
 const express = require("express");
 const multer = require("multer");
-const fs = require("fs");
-const fetch = (...args) => import("node-fetch").then(({default: fetch}) => fetch(...args));
+const fetch = require("node-fetch");
 const FormData = require("form-data");
 
 const app = express();
-const upload = multer({ dest: "uploads/" });
+const upload = multer();
 
-const MEMORY_FILE = "memory.json";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-function loadMemory() {
-  if (!fs.existsSync(MEMORY_FILE)) return {};
-  return JSON.parse(fs.readFileSync(MEMORY_FILE));
-}
+// ===== メモリ（簡易） =====
+let userMemory = {
+  name: null,
+  history: []
+};
 
-function saveMemory(data) {
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
-}
+// ===== 名前取得（URL対応） =====
+app.use((req, res, next) => {
+  const name = req.query.name;
+  if (name) {
+    userMemory.name = name;
+  }
+  next();
+});
 
-app.post("/voice", upload.single("audio"), async (req, res) => {
+// ===== 静的ファイル =====
+app.use(express.static("public"));
+
+// ===== 音声受信 =====
+app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    const audioFile = req.file.path;
-    const memory = loadMemory();
-
-    const userId = req.body.userId || "default";
-
-    if (!memory[userId]) {
-      memory[userId] = {
-        name: req.body.name || "おともだち",
-        gender: req.body.gender || "girl",
-        history: []
-      };
+    if (!req.file) {
+      return res.status(400).send("音声なし");
     }
 
-    const user = memory[userId];
+    console.log("リクエスト来た");
 
-    if (req.body.name) user.name = req.body.name;
-    if (req.body.gender) user.gender = req.body.gender;
+    // ===== Whisper（音声→テキスト）=====
+    const formData = new FormData();
+    formData.append("file", req.file.buffer, {
+      filename: "audio.webm",
+      contentType: "audio/webm"
+    });
+    formData.append("model", "gpt-4o-mini-transcribe");
 
-    const suffix = user.gender === "boy" ? "くん" : "ちゃん";
-
-    // ===== Whisper =====
-    const form = new FormData();
-    form.append("file", fs.createReadStream(audioFile));
-    form.append("model", "gpt-4o-mini-transcribe");
-    form.append("language", "ja");
-
-    const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+        Authorization: `Bearer ${OPENAI_API_KEY}`
       },
-      body: form
+      body: formData
     });
 
-    const whisperData = await whisperRes.json();
-    const text = whisperData.text || "";
+    const sttData = await sttRes.json();
+    const text = sttData.text || "";
 
     console.log("認識:", text);
 
-    if (!text.trim()) {
-      fs.unlinkSync(audioFile);
-      return res.status(204).end();
+    if (!text || text.trim() === "") {
+      console.log("無音スキップ");
+      return res.send({ reply: "" });
     }
 
-    user.history.push({ role: "user", content: text });
-    user.history = user.history.slice(-10);
+    // ===== 名前処理 =====
+    const name = userMemory.name;
+    const isBoy = name && (name.endsWith("くん") || name.endsWith("君"));
 
-    const callName = Math.random() < 0.4;
-    const nameCall = callName ? `${user.name}${suffix}` : "";
+    const callName = name
+      ? (isBoy ? `${name}` : `${name}ちゃん`)
+      : "";
+
+    const useName = Math.random() < 0.4;
+
+    // ===== 会話履歴追加 =====
+    userMemory.history.push({ role: "user", content: text });
+    userMemory.history = userMemory.history.slice(-6);
 
     // ===== GPT =====
-    const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `
+    const prompt = `
 あなたはやさしいぬいぐるみです。
 
 ・1文で話す
 ・最大でも2文まで
 ・短くする（超重要）
+・説明しすぎない
 ・子供に話しかける
 
-${nameCall ? `・「${nameCall}」と呼ぶ` : "・名前は呼ばない"}
-`
-          },
-          ...user.history
+${useName && callName ? `・たまに「${callName}」と呼ぶ` : ""}
+`;
+
+    const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: prompt },
+          ...userMemory.history
         ]
       })
     });
 
-    const chatData = await chatRes.json();
-    const reply = chatData.choices[0].message.content;
+    const gptData = await gptRes.json();
+    const reply = gptData.choices?.[0]?.message?.content || "";
 
     console.log("返答:", reply);
 
-    user.history.push({ role: "assistant", content: reply });
-    saveMemory(memory);
+    // ===== 履歴保存 =====
+    userMemory.history.push({ role: "assistant", content: reply });
 
-    // ===== TTS =====
-    const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini-tts",
-        voice: "alloy",
-        input: reply
-      })
-    });
+    res.send({ reply });
 
-    const audioBuffer = Buffer.from(await ttsRes.arrayBuffer());
-
-    fs.unlinkSync(audioFile);
-
-    res.set("Content-Type", "audio/mpeg");
-    res.send(audioBuffer);
-
-  } catch (e) {
-    console.error("エラー:", e);
-    res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("エラー");
   }
 });
 
-app.use(express.static("."));
-app.listen(3001, () => console.log("http://localhost:3001"));
+// ===== ポート（超重要）=====
+const PORT = process.env.PORT || 3001;
+
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
+});
