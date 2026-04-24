@@ -106,7 +106,7 @@ function detectVoice() {
       if (!silenceStart) {
         silenceStart = Date.now();
       } else {
-        if (Date.now() - silenceStart > 1200) {
+        if (Date.now() - silenceStart > 600) {
           stopRecording();
         }
       }

@@ -38,6 +38,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
+        temperature: 0.3,
         messages: [
           { role: "system", content: "あなたはやさしいぬいぐるみ。短く話す。" },
           { role: "user", content: text }
