@@ -10,9 +10,9 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    const name = req.body.name || "ともだち";
+    const name = req.body.name;
 
-    // STT
+    // ===== STT =====
     const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
@@ -30,7 +30,11 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const text = sttData.text || "";
     console.log("認識:", text);
 
-    // GPT
+    // ===== GPT =====
+    const systemPrompt = name
+      ? `あなたはやさしいぬいぐるみ。時々「${name}」と呼びかけて短く1文で答える。`
+      : `あなたはやさしいぬいぐるみ。短く1文で答える。`;
+
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -42,10 +46,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
         temperature: 0.3,
         max_tokens: 50,
         messages: [
-          {
-            role: "system",
-            content: `あなたはやさしいぬいぐるみ。時々「${name}」と呼びかけて短く1文で答える。`
-          },
+          { role: "system", content: systemPrompt },
           { role: "user", content: text }
         ]
       })
@@ -55,7 +56,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const reply = gptData.choices[0].message.content;
     console.log("返答:", reply);
 
-    // TTS
+    // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {

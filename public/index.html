@@ -20,15 +20,15 @@ let stream;
 let audioPlayer;
 
 let silenceStart = null;
-let sentEarly = false;
 let isManualStop = false;
 let isRunning = false;
+let isPlaying = false;
 let recordStartTime = 0;
 
 const params = new URLSearchParams(window.location.search);
-const userName = params.get("name") || "ともだち";
+const userName = params.get("name");
 
-// 🔥 調整済みパラメータ
+// 調整値
 const THRESHOLD = 0.01;
 const SILENCE_TIME = 1200;
 const MIN_RECORD_TIME = 800;
@@ -79,6 +79,8 @@ document.getElementById("stop").onclick = () => {
 
 // ===== 録音 =====
 function startRecording() {
+  if (!isRunning) return;
+
   console.log("🎤 録音開始");
 
   audioChunks = [];
@@ -90,15 +92,10 @@ function startRecording() {
 
   mediaRecorder.onstop = async () => {
 
-    if (isManualStop) {
-      console.log("手動停止 → 何もしない");
-      return;
-    }
+    if (isManualStop) return;
 
     const duration = Date.now() - recordStartTime;
-
     if (duration < MIN_RECORD_TIME) {
-      console.log("短すぎてスキップ");
       restart();
       return;
     }
@@ -109,7 +106,7 @@ function startRecording() {
 
     const formData = new FormData();
     formData.append("audio", blob);
-    formData.append("name", userName);
+    formData.append("name", userName || "");
 
     const res = await fetch("/api/voice", {
       method: "POST",
@@ -118,10 +115,19 @@ function startRecording() {
 
     const url = URL.createObjectURL(await res.blob());
 
+    // 🔥 再生中は録音止める
+    isPlaying = true;
+
     audioPlayer.src = url;
     await audioPlayer.play().catch(e => console.log("再生エラー", e));
 
-    restart();
+    audioPlayer.onended = () => {
+      isPlaying = false;
+
+      setTimeout(() => {
+        restart();
+      }, 300);
+    };
   };
 
   mediaRecorder.start();
@@ -131,17 +137,15 @@ function startRecording() {
 // ===== 再スタート =====
 function restart() {
   if (!isRunning) return;
+  if (isPlaying) return;
 
-  setTimeout(() => {
-    silenceStart = null;
-    sentEarly = false;
-    startRecording();
-  }, 300);
+  silenceStart = null;
+  startRecording();
 }
 
 // ===== VAD =====
 function detect() {
-  if (!isRunning) return;
+  if (!isRunning || isPlaying) return;
 
   analyser.getByteTimeDomainData(dataArray);
 
@@ -153,7 +157,6 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
-  // 無音判定
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
