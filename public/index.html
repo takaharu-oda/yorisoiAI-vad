@@ -27,23 +27,34 @@ let isRunning = false;
 const params = new URLSearchParams(window.location.search);
 const userName = params.get("name") || "ともだち";
 
-const THRESHOLD = 0.005;
+const THRESHOLD = 0.02;
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
-  if (isRunning) return;
-
   console.log("🚀 開始");
+
+  if (isRunning) return;
   isRunning = true;
   isManualStop = false;
 
-  // 音アンロック（重要）
-  audioContext = new AudioContext();
-  await audioContext.resume();
+  try {
+    // Audio unlock
+    audioContext = new AudioContext();
+    await audioContext.resume();
+    console.log("AudioContext OK");
+
+    // 🎤 マイク取得
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("マイク取得OK");
+
+  } catch (e) {
+    console.error("❌ マイクエラー:", e);
+    alert("マイク使えません（許可して）");
+    isRunning = false;
+    return;
+  }
 
   audioPlayer = new Audio();
-
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   const source = audioContext.createMediaStreamSource(stream);
   analyser = audioContext.createAnalyser();
@@ -67,9 +78,12 @@ document.getElementById("stop").onclick = () => {
 
 // ===== 録音開始 =====
 function startRecording() {
+  console.log("🎤 録音開始");
+
   audioChunks = [];
 
   mediaRecorder = new MediaRecorder(stream);
+  console.log("MediaRecorder作成");
 
   mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
@@ -85,6 +99,7 @@ function startRecording() {
     const blob = new Blob(audioChunks, { type: "audio/webm" });
 
     if (blob.size < 1000) {
+      console.log("小さすぎてスキップ");
       restart();
       return;
     }
@@ -135,18 +150,20 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
-  // フライング送信
+  console.log("volume:", volume);
+
   if (volume < THRESHOLD && !sentEarly && audioChunks.length > 10) {
+    console.log("⚡ フライング送信");
     sentEarly = true;
     mediaRecorder.stop();
     return;
   }
 
-  // 無音検知
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
     if (Date.now() - silenceStart > 800) {
+      console.log("🔇 無音検知");
       mediaRecorder.stop();
       return;
     }
