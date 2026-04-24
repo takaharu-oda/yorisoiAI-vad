@@ -21,15 +21,6 @@ let isPlaying = false;
 let isProcessing = false;
 let isActive = false;
 
-function getUserId() {
-  let id = localStorage.getItem("userId");
-  if (!id) {
-    id = "user_" + Math.random().toString(36).slice(2);
-    localStorage.setItem("userId", id);
-  }
-  return id;
-}
-
 // ===== スタート =====
 document.getElementById("start").onclick = async () => {
 
@@ -38,7 +29,7 @@ document.getElementById("start").onclick = async () => {
 
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.log("✅ マイク取得OK");
+    console.log("✅ マイクOK");
   } catch (e) {
     alert("マイク許可してください");
     return;
@@ -76,7 +67,7 @@ document.getElementById("stop").onclick = () => {
     micStream.getTracks().forEach(track => track.stop());
   }
 
-  console.log("🛑 会話停止");
+  console.log("🛑 停止");
 };
 
 // ===== VAD =====
@@ -92,7 +83,6 @@ function detectVoice() {
   const data = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(data);
 
-  // 🔥 RMS音量計算（ここが重要）
   let sum = 0;
   for (let i = 0; i < data.length; i++) {
     let v = (data[i] - 128) / 128;
@@ -153,7 +143,7 @@ function stopRecording() {
   mediaRecorder.stop();
 }
 
-// ===== 送信 =====
+// ===== 送信＆再生 =====
 async function sendAudio() {
 
   const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
@@ -167,7 +157,6 @@ async function sendAudio() {
 
   const formData = new FormData();
   formData.append("audio", blob);
-  formData.append("userId", getUserId());
 
   console.log("📡 送信");
 
@@ -178,8 +167,24 @@ async function sendAudio() {
 
   const audioBlob = await res.blob();
 
+  console.log("blob size:", audioBlob.size);
+
+  if (audioBlob.size === 0) {
+    console.log("❌ 音声なし");
+    isProcessing = false;
+    return;
+  }
+
   const url = URL.createObjectURL(audioBlob);
+
+  // 🔥 直接開いて確認も可能
+  console.log("audio url:", url);
+
   audioPlayer = new Audio(url);
+
+  // 🔥 強制設定
+  audioPlayer.muted = false;
+  audioPlayer.volume = 1.0;
 
   isPlaying = true;
 
@@ -189,11 +194,15 @@ async function sendAudio() {
     console.log("🔊 再生終了");
   };
 
+  audioPlayer.onerror = (e) => {
+    console.log("❌ audioエラー", e);
+  };
+
   try {
     await audioPlayer.play();
-    console.log("🔊 再生");
+    console.log("🔊 再生成功");
   } catch (e) {
-    console.log("再生エラー", e);
+    console.log("❌ 再生失敗", e);
     isPlaying = false;
     isProcessing = false;
   }
