@@ -30,8 +30,8 @@ const userName = params.get("name");
 const mode = params.get("mode");
 
 // 🔥 感度ゆるめ
-const THRESHOLD = 0.002;
-const SILENCE_TIME = 1800;
+const THRESHOLD = 0.01;
+const SILENCE_TIME = 1200;
 const MIN_RECORD_TIME = 800;
 
 document.getElementById("start").onclick = async () => {
