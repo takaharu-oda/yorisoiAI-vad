@@ -23,15 +23,16 @@ let silenceStart = null;
 let isManualStop = false;
 let isRunning = false;
 let isPlaying = false;
+let isRecording = false;
 let recordStartTime = 0;
 
 const params = new URLSearchParams(window.location.search);
 const userName = params.get("name");
 
 // ===== 調整値 =====
-const THRESHOLD = 0.02;      // ← 今の環境に最適
+const THRESHOLD = 0.02;
 const SILENCE_TIME = 800;
-const MIN_RECORD_TIME = 800;
+const MIN_RECORD_TIME = 500;
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
@@ -53,10 +54,9 @@ document.getElementById("start").onclick = async () => {
       }
     });
 
-    console.log("マイク取得OK");
+    console.log("マイクOK");
 
   } catch (e) {
-    console.error("マイクエラー:", e);
     alert("マイク許可して！");
     isRunning = false;
     return;
@@ -71,7 +71,14 @@ document.getElementById("start").onclick = async () => {
 
   dataArray = new Uint8Array(analyser.fftSize);
 
-  startRecording();
+  // recorder準備だけ（まだ録音しない）
+  mediaRecorder = new MediaRecorder(stream);
+
+  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+  mediaRecorder.onstop = handleStop;
+
+  detect();
 };
 
 // ===== STOP =====
@@ -85,80 +92,63 @@ document.getElementById("stop").onclick = () => {
   stream?.getTracks().forEach(t => t.stop());
 };
 
-// ===== 録音 =====
-function startRecording() {
-  if (!isRunning) return;
+// ===== 録音終了処理 =====
+async function handleStop() {
+  if (isManualStop) return;
 
-  console.log("🎤 録音開始");
+  const duration = Date.now() - recordStartTime;
+  if (duration < MIN_RECORD_TIME) {
+    console.log("短すぎスキップ");
+    restart();
+    return;
+  }
 
-  audioChunks = [];
-  recordStartTime = Date.now();
+  console.log("📤 送信");
 
-  mediaRecorder = new MediaRecorder(stream);
+  const blob = new Blob(audioChunks, { type: "audio/webm" });
 
-  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+  const formData = new FormData();
+  formData.append("audio", blob);
+  formData.append("name", userName || "");
 
-  mediaRecorder.onstop = async () => {
-    if (isManualStop) return;
+  const res = await fetch("/api/voice", {
+    method: "POST",
+    body: formData
+  });
 
-    const duration = Date.now() - recordStartTime;
-    if (duration < MIN_RECORD_TIME) {
-      console.log("短すぎスキップ");
-      restart();
-      return;
-    }
+  // ===== エラー対策 =====
+  if (!res.ok) {
+    console.log("❌ サーバー:", await res.text());
+    restart();
+    return;
+  }
 
-    console.log("📤 送信");
+  const contentType = res.headers.get("content-type");
+  if (!contentType || !contentType.includes("audio")) {
+    console.log("❌ 音声じゃない");
+    restart();
+    return;
+  }
 
-    const blob = new Blob(audioChunks, { type: "audio/webm" });
+  const blobRes = await res.blob();
 
-    const formData = new FormData();
-    formData.append("audio", blob);
-    formData.append("name", userName || "");
+  if (blobRes.size < 1000) {
+    console.log("❌ 小さい");
+    restart();
+    return;
+  }
 
-    const res = await fetch("/api/voice", {
-      method: "POST",
-      body: formData
-    });
+  const url = URL.createObjectURL(blobRes);
 
-    // ===== 🔥 超重要：エラー対策 =====
-    if (!res.ok) {
-      console.log("❌ サーバー:", await res.text());
-      restart();
-      return;
-    }
+  isPlaying = true;
 
-    const contentType = res.headers.get("content-type");
-    if (!contentType || !contentType.includes("audio")) {
-      console.log("❌ 音声じゃない:", contentType);
-      restart();
-      return;
-    }
+  audioPlayer.src = url;
+  await audioPlayer.play().catch(e => console.log("再生エラー", e));
 
-    const blobRes = await res.blob();
-
-    if (blobRes.size < 1000) {
-      console.log("❌ データ小さい");
-      restart();
-      return;
-    }
-
-    const url = URL.createObjectURL(blobRes);
-
-    // ===== 再生 =====
-    isPlaying = true;
-
-    audioPlayer.src = url;
-    await audioPlayer.play().catch(e => console.log("再生エラー", e));
-
-    audioPlayer.onended = () => {
-      isPlaying = false;
-      setTimeout(() => restart(), 300);
-    };
+  audioPlayer.onended = () => {
+    isPlaying = false;
+    setTimeout(() => restart(), 300);
   };
-
-  mediaRecorder.start();
-  detect();
 }
 
 // ===== 再スタート =====
@@ -166,12 +156,13 @@ function restart() {
   if (!isRunning || isPlaying) return;
 
   silenceStart = null;
-  startRecording();
+  isRecording = false;
+  audioChunks = [];
 }
 
 // ===== VAD =====
 function detect() {
-  if (!isRunning || isPlaying) return;
+  if (!isRunning) return;
 
   analyser.getByteTimeDomainData(dataArray);
 
@@ -182,22 +173,34 @@ function detect() {
   }
 
   const volume = Math.sqrt(sum / dataArray.length);
+  console.log("volume:", volume);
 
-  console.log("volume:", volume); // ← デバッグ
+  // ===== 話し始め =====
+  if (!isRecording && !isPlaying && volume > THRESHOLD) {
+    console.log("🗣️ 話し始め");
 
-  if (volume < THRESHOLD) {
-    if (!silenceStart) silenceStart = Date.now();
-
-    if (
-      Date.now() - silenceStart > SILENCE_TIME &&
-      Date.now() - recordStartTime > MIN_RECORD_TIME
-    ) {
-      console.log("🔇 無音 → 送信");
-      mediaRecorder.stop();
-      return;
-    }
-  } else {
+    isRecording = true;
+    audioChunks = [];
     silenceStart = null;
+
+    mediaRecorder.start();
+    recordStartTime = Date.now();
+  }
+
+  // ===== 話し終わり =====
+  if (isRecording) {
+    if (volume < THRESHOLD) {
+      if (!silenceStart) silenceStart = Date.now();
+
+      if (Date.now() - silenceStart > SILENCE_TIME) {
+        console.log("🔇 話し終わり");
+
+        isRecording = false;
+        mediaRecorder.stop();
+      }
+    } else {
+      silenceStart = null;
+    }
   }
 
   requestAnimationFrame(detect);
