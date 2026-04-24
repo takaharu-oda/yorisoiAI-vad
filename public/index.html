@@ -29,11 +29,11 @@ const params = new URLSearchParams(window.location.search);
 const userName = params.get("name");
 const mode = params.get("mode");
 
-const THRESHOLD = 0.005;
+// 🔥 感度ゆるめ
+const THRESHOLD = 0.002;
 const SILENCE_TIME = 1800;
 const MIN_RECORD_TIME = 800;
 
-// ===== START =====
 document.getElementById("start").onclick = async () => {
   if (isRunning) return;
 
@@ -43,7 +43,15 @@ document.getElementById("start").onclick = async () => {
   try {
     audioContext = new AudioContext();
     await audioContext.resume();
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
   } catch (e) {
     alert("マイク許可して！");
     isRunning = false;
@@ -54,6 +62,7 @@ document.getElementById("start").onclick = async () => {
 
   const source = audioContext.createMediaStreamSource(stream);
   analyser = audioContext.createAnalyser();
+  analyser.fftSize = 2048;
   source.connect(analyser);
 
   dataArray = new Uint8Array(analyser.fftSize);
@@ -61,7 +70,6 @@ document.getElementById("start").onclick = async () => {
   startRecording();
 };
 
-// ===== STOP =====
 document.getElementById("stop").onclick = () => {
   isManualStop = true;
   isRunning = false;
@@ -69,7 +77,6 @@ document.getElementById("stop").onclick = () => {
   stream?.getTracks().forEach(t => t.stop());
 };
 
-// ===== 録音 =====
 function startRecording() {
   if (!isRunning) return;
 
@@ -83,12 +90,6 @@ function startRecording() {
   mediaRecorder.onstop = async () => {
     if (isManualStop) return;
 
-    const duration = Date.now() - recordStartTime;
-    if (duration < MIN_RECORD_TIME) {
-      restart();
-      return;
-    }
-
     const blob = new Blob(audioChunks, { type: "audio/webm" });
 
     const formData = new FormData();
@@ -101,9 +102,8 @@ function startRecording() {
       body: formData
     });
 
-    // 🔥 ここが今回の最重要修正
     if (!res.ok) {
-      console.log("👂 無音 or エラー:", await res.text());
+      console.log("❌ サーバー:", await res.text());
       restart();
       return;
     }
@@ -132,14 +132,12 @@ function startRecording() {
   detect();
 }
 
-// ===== 再スタート =====
 function restart() {
   if (!isRunning || isPlaying) return;
   silenceStart = null;
   startRecording();
 }
 
-// ===== VAD =====
 function detect() {
   if (!isRunning || isPlaying) return;
 
@@ -152,6 +150,8 @@ function detect() {
   }
 
   const volume = Math.sqrt(sum / dataArray.length);
+
+  console.log("volume:", volume); // 👈超重要
 
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();

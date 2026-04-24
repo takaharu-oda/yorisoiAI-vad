@@ -15,11 +15,13 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const name = req.body?.name;
     const mode = req.body?.mode;
 
-    // ===== STT =====
+    // ===== 音声チェック =====
     if (!req.file || !req.file.buffer) {
+      console.log("❌ audioなし");
       return res.status(400).send("no audio");
     }
 
+    // ===== STT =====
     const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
@@ -38,30 +40,28 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const sttData = await sttRes.json().catch(() => ({}));
     const text = sttData?.text || "";
 
-    console.log("認識:", text);
+    console.log("📝 認識:", text || "(空)");
 
-    // 🔥 無音
-    if (!text) {
-      return res.status(400).send("no speech");
-    }
+    // ❌ ←ここが今回の変更（無音でも止めない）
+    // if (!text) {
+    //   return res.status(400).send("no speech");
+    // }
 
     // ===== 呼び方 =====
     let systemPrompt;
 
     if (mode === "multi") {
-      systemPrompt = `やさしいぬいぐるみ。ときどき「みんなー」と呼ぶ。短く1文で答える。`;
+      systemPrompt = `やさしいぬいぐるみ。ときどき「みんなー」と呼ぶ。短く1文。`;
     } else if (name) {
-      systemPrompt = `やさしいぬいぐるみ。ときどき「${name}」と呼ぶ。短く1文で答える。`;
+      systemPrompt = `やさしいぬいぐるみ。ときどき「${name}」と呼ぶ。短く1文。`;
     } else {
-      systemPrompt = `やさしいぬいぐるみ。短く1文で答える。`;
+      systemPrompt = `やさしいぬいぐるみ。短く1文。`;
     }
 
     // ===== 履歴 =====
-    history.push({ role: "user", content: text });
+    history.push({ role: "user", content: text || "..." });
 
-    const safeHistory = history
-      .filter(m => m && m.role && m.content)
-      .slice(-6);
+    const safeHistory = history.slice(-6);
 
     // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -85,9 +85,9 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const reply =
       gptData?.choices?.[0]?.message?.content ||
-      "ちょっと聞き取れなかったよ";
+      "もう一回話してくれる？";
 
-    console.log("返答:", reply);
+    console.log("🤖 返答:", reply);
 
     history.push({ role: "assistant", content: reply });
 
