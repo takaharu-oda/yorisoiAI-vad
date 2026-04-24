@@ -8,6 +8,9 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+// 🔥 会話履歴（簡易：全ユーザー共通）
+let history = [];
+
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
     const name = req.body.name;
@@ -36,18 +39,24 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     if (mode === "multi") {
       const callGroup = Math.random() < 0.4;
-
       systemPrompt = callGroup
         ? `あなたはやさしいぬいぐるみ。「みんなー」と優しく呼びかけてもよいが毎回は言わない。短く1文で答える。`
         : `あなたはやさしいぬいぐるみ。自然に短く1文で答える。`;
     } else if (name) {
       const shouldCallName = Math.random() < 0.3;
-
       systemPrompt = shouldCallName
         ? `あなたはやさしいぬいぐるみ。「${name}」と呼びかけてもよいが毎回は呼ばない。短く1文で答える。`
         : `あなたはやさしいぬいぐるみ。名前は呼ばずに短く1文で答える。`;
     } else {
       systemPrompt = `あなたはやさしいぬいぐるみ。短く1文で答える。`;
+    }
+
+    // ===== 履歴に追加 =====
+    history.push({ role: "user", content: text });
+
+    // 古い履歴を削る（最新6件だけ）
+    if (history.length > 6) {
+      history = history.slice(-6);
     }
 
     // ===== GPT =====
@@ -63,7 +72,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
         max_tokens: 50,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: text }
+          ...history
         ]
       })
     });
@@ -71,6 +80,9 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const gptData = await gptRes.json();
     const reply = gptData.choices[0].message.content;
     console.log("返答:", reply);
+
+    // ===== 履歴にAIも追加 =====
+    history.push({ role: "assistant", content: reply });
 
     // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
