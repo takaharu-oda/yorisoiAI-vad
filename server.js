@@ -8,7 +8,6 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// 会話履歴
 let history = [];
 
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
@@ -17,13 +16,11 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const mode = req.body?.mode;
 
     // ===== STT =====
-    const form = new FormData();
-
     if (!req.file || !req.file.buffer) {
-      console.log("❌ 音声データなし");
       return res.status(400).send("no audio");
     }
 
+    const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
       contentType: "audio/webm"
@@ -43,7 +40,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     console.log("認識:", text);
 
-    // 🔥 無音対策
+    // 🔥 無音
     if (!text) {
       return res.status(400).send("no speech");
     }
@@ -59,7 +56,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       systemPrompt = `やさしいぬいぐるみ。短く1文で答える。`;
     }
 
-    // ===== 履歴安全化 =====
+    // ===== 履歴 =====
     history.push({ role: "user", content: text });
 
     const safeHistory = history
@@ -110,7 +107,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     });
 
     if (!ttsRes.ok) {
-      console.log("❌ TTS失敗");
       return res.status(500).send("tts error");
     }
 

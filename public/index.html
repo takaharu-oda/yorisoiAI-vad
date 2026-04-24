@@ -29,7 +29,6 @@ const params = new URLSearchParams(window.location.search);
 const userName = params.get("name");
 const mode = params.get("mode");
 
-// 調整値
 const THRESHOLD = 0.01;
 const SILENCE_TIME = 1200;
 const MIN_RECORD_TIME = 800;
@@ -38,16 +37,13 @@ const MIN_RECORD_TIME = 800;
 document.getElementById("start").onclick = async () => {
   if (isRunning) return;
 
-  console.log("🚀 開始");
   isRunning = true;
   isManualStop = false;
 
   try {
     audioContext = new AudioContext();
     await audioContext.resume();
-
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
   } catch (e) {
     alert("マイク許可して！");
     isRunning = false;
@@ -69,7 +65,6 @@ document.getElementById("start").onclick = async () => {
 document.getElementById("stop").onclick = () => {
   isManualStop = true;
   isRunning = false;
-
   mediaRecorder?.stop();
   stream?.getTracks().forEach(t => t.stop());
 };
@@ -106,12 +101,26 @@ function startRecording() {
       body: formData
     });
 
-    const url = URL.createObjectURL(await res.blob());
+    // 🔥 ここが今回の最重要修正
+    if (!res.ok) {
+      console.log("👂 無音 or エラー:", await res.text());
+      restart();
+      return;
+    }
+
+    const blobRes = await res.blob();
+
+    if (blobRes.size < 1000) {
+      restart();
+      return;
+    }
+
+    const url = URL.createObjectURL(blobRes);
 
     isPlaying = true;
 
     audioPlayer.src = url;
-    await audioPlayer.play();
+    await audioPlayer.play().catch(() => {});
 
     audioPlayer.onended = () => {
       isPlaying = false;
@@ -126,7 +135,6 @@ function startRecording() {
 // ===== 再スタート =====
 function restart() {
   if (!isRunning || isPlaying) return;
-
   silenceStart = null;
   startRecording();
 }
