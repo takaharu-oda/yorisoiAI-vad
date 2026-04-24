@@ -11,6 +11,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
     const name = req.body.name;
+    const mode = req.body.mode;
 
     // ===== STT =====
     const form = new FormData();
@@ -30,11 +31,26 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const text = sttData.text || "";
     console.log("認識:", text);
 
-    // ===== GPT =====
-    const systemPrompt = name
-      ? `あなたはやさしいぬいぐるみ。時々「${name}」と呼びかけて短く1文で答える。`
-      : `あなたはやさしいぬいぐるみ。短く1文で答える。`;
+    // ===== 呼び方ロジック =====
+    let systemPrompt;
 
+    if (mode === "multi") {
+      const callGroup = Math.random() < 0.4;
+
+      systemPrompt = callGroup
+        ? `あなたはやさしいぬいぐるみ。「みんなー」と優しく呼びかけてもよいが毎回は言わない。短く1文で答える。`
+        : `あなたはやさしいぬいぐるみ。自然に短く1文で答える。`;
+    } else if (name) {
+      const shouldCallName = Math.random() < 0.3;
+
+      systemPrompt = shouldCallName
+        ? `あなたはやさしいぬいぐるみ。「${name}」と呼びかけてもよいが毎回は呼ばない。短く1文で答える。`
+        : `あなたはやさしいぬいぐるみ。名前は呼ばずに短く1文で答える。`;
+    } else {
+      systemPrompt = `あなたはやさしいぬいぐるみ。短く1文で答える。`;
+    }
+
+    // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
