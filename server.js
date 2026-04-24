@@ -3,13 +3,15 @@ const multer = require("multer");
 const fetch = require("node-fetch");
 const FormData = require("form-data");
 
-const app = express();
+const app = express(); // ← これが無いと今回のエラー出る
 const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+// ===== API =====
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
+    // ===== STT =====
     const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
@@ -27,6 +29,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const text = sttData.text || "";
     console.log("認識:", text);
 
+    // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -35,13 +38,8 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        temperature: 0.3,
-        max_tokens: 50,
         messages: [
-          {
-            role: "system",
-            content: "あなたはやさしいぬいぐるみ。必ず短く1文で答える。"
-          },
+          { role: "system", content: "あなたはやさしいぬいぐるみ。短く話す。" },
           { role: "user", content: text }
         ]
       })
@@ -51,6 +49,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const reply = gptData.choices[0].message.content;
     console.log("返答:", reply);
 
+    // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -65,6 +64,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
+    // 🔥 ストリームで返す（重要）
     res.set("Content-Type", "audio/mpeg");
     ttsRes.body.pipe(res);
 
@@ -74,8 +74,10 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
   }
 });
 
+// ===== 静的ファイル =====
 app.use(express.static("public"));
 
+// ===== 起動 =====
 app.listen(process.env.PORT || 3001, () => {
   console.log("server running");
 });
