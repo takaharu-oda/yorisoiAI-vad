@@ -3,7 +3,7 @@ const multer = require("multer");
 const fetch = require("node-fetch");
 const FormData = require("form-data");
 
-const app = express(); // ← これが無いと今回のエラー出る
+const app = express();
 const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -39,8 +39,12 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         temperature: 0.3,
+        max_tokens: 50,
         messages: [
-          { role: "system", content: "あなたはやさしいぬいぐるみ。短く話す。" },
+          {
+            role: "system",
+            content: "あなたはやさしいぬいぐるみ。必ず短く1文で答える。"
+          },
           { role: "user", content: text }
         ]
       })
@@ -65,8 +69,9 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
-    // 🔥 ストリームで返す（重要）
     res.set("Content-Type", "audio/mpeg");
+
+    // 🔥 即ストリーム再生
     ttsRes.body.pipe(res);
 
   } catch (e) {
@@ -75,7 +80,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
   }
 });
 
-// ===== 静的ファイル =====
+// ===== 静的 =====
 app.use(express.static("public"));
 
 // ===== 起動 =====
