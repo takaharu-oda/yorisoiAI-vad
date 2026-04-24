@@ -2,11 +2,11 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI</title>
+<title>よりそいAI（VAD）</title>
 </head>
 <body>
 
-<h1>よりそいAI</h1>
+<h1>よりそいAI（VAD）</h1>
 <button id="start">会話スタート</button>
 <button id="stop">会話ストップ</button>
 
@@ -27,7 +27,6 @@ let recordStartTime = 0;
 
 const params = new URLSearchParams(window.location.search);
 const userName = params.get("name");
-const mode = params.get("mode");
 
 // 調整値
 const THRESHOLD = 0.01;
@@ -47,8 +46,10 @@ document.getElementById("start").onclick = async () => {
     await audioContext.resume();
 
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("マイク取得OK");
 
   } catch (e) {
+    console.error("マイクエラー:", e);
     alert("マイク許可して！");
     isRunning = false;
     return;
@@ -67,6 +68,8 @@ document.getElementById("start").onclick = async () => {
 
 // ===== STOP =====
 document.getElementById("stop").onclick = () => {
+  console.log("⛔ 停止");
+
   isManualStop = true;
   isRunning = false;
 
@@ -78,6 +81,8 @@ document.getElementById("stop").onclick = () => {
 function startRecording() {
   if (!isRunning) return;
 
+  console.log("🎤 録音開始");
+
   audioChunks = [];
   recordStartTime = Date.now();
 
@@ -86,6 +91,7 @@ function startRecording() {
   mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
   mediaRecorder.onstop = async () => {
+
     if (isManualStop) return;
 
     const duration = Date.now() - recordStartTime;
@@ -94,12 +100,13 @@ function startRecording() {
       return;
     }
 
+    console.log("📤 送信");
+
     const blob = new Blob(audioChunks, { type: "audio/webm" });
 
     const formData = new FormData();
     formData.append("audio", blob);
     formData.append("name", userName || "");
-    formData.append("mode", mode || "");
 
     const res = await fetch("/api/voice", {
       method: "POST",
@@ -108,14 +115,18 @@ function startRecording() {
 
     const url = URL.createObjectURL(await res.blob());
 
+    // 🔥 再生中は録音止める
     isPlaying = true;
 
     audioPlayer.src = url;
-    await audioPlayer.play();
+    await audioPlayer.play().catch(e => console.log("再生エラー", e));
 
     audioPlayer.onended = () => {
       isPlaying = false;
-      setTimeout(() => restart(), 300);
+
+      setTimeout(() => {
+        restart();
+      }, 300);
     };
   };
 
@@ -125,7 +136,8 @@ function startRecording() {
 
 // ===== 再スタート =====
 function restart() {
-  if (!isRunning || isPlaying) return;
+  if (!isRunning) return;
+  if (isPlaying) return;
 
   silenceStart = null;
   startRecording();
@@ -152,6 +164,7 @@ function detect() {
       Date.now() - silenceStart > SILENCE_TIME &&
       Date.now() - recordStartTime > MIN_RECORD_TIME
     ) {
+      console.log("🔇 無音 → 送信");
       mediaRecorder.stop();
       return;
     }
