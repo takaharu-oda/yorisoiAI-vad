@@ -12,6 +12,10 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
     const name = req.body.name;
 
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).send("no audio");
+    }
+
     // ===== STT =====
     const form = new FormData();
     form.append("file", req.file.buffer, {
@@ -26,14 +30,19 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       body: form
     });
 
-    const sttData = await sttRes.json();
-    const text = sttData.text || "";
-    console.log("認識:", text);
+    const sttData = await sttRes.json().catch(() => ({}));
+    const text = sttData?.text || "";
+    console.log("認識:", text || "(空)");
+
+    // 🔥 無音スキップ
+    if (!text || text.trim() === "") {
+      return res.status(400).send("no speech");
+    }
 
     // ===== GPT =====
     const systemPrompt = name
-      ? `あなたはやさしいぬいぐるみ。時々「${name}」と呼びかけて短く1文で答える。`
-      : `あなたはやさしいぬいぐるみ。短く1文で答える。`;
+      ? `やさしいぬいぐるみ。時々「${name}」と呼び短く1文で答える。`
+      : `やさしいぬいぐるみ。短く1文で答える。`;
 
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -52,8 +61,12 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
-    const gptData = await gptRes.json();
-    const reply = gptData.choices[0].message.content;
+    const gptData = await gptRes.json().catch(() => ({}));
+
+    const reply =
+      gptData?.choices?.[0]?.message?.content ||
+      "もう一回話してくれる？";
+
     console.log("返答:", reply);
 
     // ===== TTS =====
@@ -71,12 +84,16 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
+    if (!ttsRes.ok) {
+      return res.status(500).send("tts error");
+    }
+
     res.set("Content-Type", "audio/mpeg");
     ttsRes.body.pipe(res);
 
   } catch (e) {
-    console.error(e);
-    res.status(500).send("error");
+    console.error("🔥 サーバーエラー:", e);
+    res.status(500).send("server error");
   }
 });
 

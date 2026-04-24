@@ -28,9 +28,9 @@ let recordStartTime = 0;
 const params = new URLSearchParams(window.location.search);
 const userName = params.get("name");
 
-// 調整値
-const THRESHOLD = 0.01;
-const SILENCE_TIME = 1200;
+// ===== 調整値 =====
+const THRESHOLD = 0.02;      // ← 今の環境に最適
+const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
 
 // ===== START =====
@@ -45,7 +45,14 @@ document.getElementById("start").onclick = async () => {
     audioContext = new AudioContext();
     await audioContext.resume();
 
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
     console.log("マイク取得OK");
 
   } catch (e) {
@@ -59,6 +66,7 @@ document.getElementById("start").onclick = async () => {
 
   const source = audioContext.createMediaStreamSource(stream);
   analyser = audioContext.createAnalyser();
+  analyser.fftSize = 2048;
   source.connect(analyser);
 
   dataArray = new Uint8Array(analyser.fftSize);
@@ -91,11 +99,11 @@ function startRecording() {
   mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
   mediaRecorder.onstop = async () => {
-
     if (isManualStop) return;
 
     const duration = Date.now() - recordStartTime;
     if (duration < MIN_RECORD_TIME) {
+      console.log("短すぎスキップ");
       restart();
       return;
     }
@@ -113,9 +121,31 @@ function startRecording() {
       body: formData
     });
 
-    const url = URL.createObjectURL(await res.blob());
+    // ===== 🔥 超重要：エラー対策 =====
+    if (!res.ok) {
+      console.log("❌ サーバー:", await res.text());
+      restart();
+      return;
+    }
 
-    // 🔥 再生中は録音止める
+    const contentType = res.headers.get("content-type");
+    if (!contentType || !contentType.includes("audio")) {
+      console.log("❌ 音声じゃない:", contentType);
+      restart();
+      return;
+    }
+
+    const blobRes = await res.blob();
+
+    if (blobRes.size < 1000) {
+      console.log("❌ データ小さい");
+      restart();
+      return;
+    }
+
+    const url = URL.createObjectURL(blobRes);
+
+    // ===== 再生 =====
     isPlaying = true;
 
     audioPlayer.src = url;
@@ -123,10 +153,7 @@ function startRecording() {
 
     audioPlayer.onended = () => {
       isPlaying = false;
-
-      setTimeout(() => {
-        restart();
-      }, 300);
+      setTimeout(() => restart(), 300);
     };
   };
 
@@ -136,8 +163,7 @@ function startRecording() {
 
 // ===== 再スタート =====
 function restart() {
-  if (!isRunning) return;
-  if (isPlaying) return;
+  if (!isRunning || isPlaying) return;
 
   silenceStart = null;
   startRecording();
@@ -156,6 +182,8 @@ function detect() {
   }
 
   const volume = Math.sqrt(sum / dataArray.length);
+
+  console.log("volume:", volume); // ← デバッグ
 
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
