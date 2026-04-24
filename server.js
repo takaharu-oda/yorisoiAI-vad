@@ -12,6 +12,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
     const name = req.body.name || "ともだち";
 
+    // STT
     const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
@@ -29,6 +30,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const text = sttData.text || "";
     console.log("認識:", text);
 
+    // GPT
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -42,7 +44,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `あなたはやさしいぬいぐるみ。時々「${name}」と呼びかけて、短く1文で答える。`
+            content: `あなたはやさしいぬいぐるみ。時々「${name}」と呼びかけて短く1文で答える。`
           },
           { role: "user", content: text }
         ]
@@ -53,6 +55,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const reply = gptData.choices[0].message.content;
     console.log("返答:", reply);
 
+    // TTS
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {

@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>よりそいAI（VAD）</title>
+<meta charset="UTF-8">
+<title>よりそいAI（VAD）</title>
 </head>
 <body>
-  <h1>よりそいAI（VAD）</h1>
-  <button id="start">会話スタート</button>
-  <button id="stop">会話ストップ</button>
+
+<h1>よりそいAI（VAD）</h1>
+<button id="start">会話スタート</button>
+<button id="stop">会話ストップ</button>
 
 <script>
 let mediaRecorder;
@@ -20,6 +21,8 @@ let audioPlayer;
 
 let silenceStart = null;
 let sentEarly = false;
+let isManualStop = false;
+let isRunning = false;
 
 const params = new URLSearchParams(window.location.search);
 const userName = params.get("name") || "ともだち";
@@ -28,9 +31,13 @@ const THRESHOLD = 0.005;
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
-  console.log("🚀 VAD開始");
+  if (isRunning) return;
 
-  // 🔥 AudioContextでアンロック（これが最重要）
+  console.log("🚀 開始");
+  isRunning = true;
+  isManualStop = false;
+
+  // 音アンロック（重要）
   audioContext = new AudioContext();
   await audioContext.resume();
 
@@ -44,18 +51,40 @@ document.getElementById("start").onclick = async () => {
 
   dataArray = new Uint8Array(analyser.fftSize);
 
-  mediaRecorder = new MediaRecorder(stream);
+  startRecording();
+};
+
+// ===== STOP =====
+document.getElementById("stop").onclick = () => {
+  console.log("⛔ 停止");
+
+  isManualStop = true;
+  isRunning = false;
+
+  mediaRecorder?.stop();
+  stream?.getTracks().forEach(t => t.stop());
+};
+
+// ===== 録音開始 =====
+function startRecording() {
   audioChunks = [];
+
+  mediaRecorder = new MediaRecorder(stream);
 
   mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
   mediaRecorder.onstop = async () => {
-    console.log("📤 送信");
+
+    if (isManualStop) {
+      console.log("手動停止 → 何もしない");
+      return;
+    }
+
+    console.log("📤 自動送信");
 
     const blob = new Blob(audioChunks, { type: "audio/webm" });
 
     if (blob.size < 1000) {
-      console.log("小さすぎてスキップ");
       restart();
       return;
     }
@@ -71,38 +100,31 @@ document.getElementById("start").onclick = async () => {
 
     const url = URL.createObjectURL(await res.blob());
 
-    // 🔥 安定再生
     audioPlayer.src = url;
-    await audioPlayer.play().catch(e => {
-      console.log("再生エラー", e);
-    });
+    await audioPlayer.play().catch(e => console.log("再生エラー", e));
 
     restart();
   };
 
   mediaRecorder.start();
   detect();
-};
-
-// ===== STOP =====
-document.getElementById("stop").onclick = () => {
-  console.log("⛔ 停止");
-  mediaRecorder?.stop();
-};
+}
 
 // ===== 再スタート =====
 function restart() {
+  if (!isRunning) return;
+
   setTimeout(() => {
-    sentEarly = false;
     silenceStart = null;
-    audioChunks = [];
-    mediaRecorder.start();
-    detect();
+    sentEarly = false;
+    startRecording();
   }, 300);
 }
 
 // ===== VAD =====
 function detect() {
+  if (!isRunning) return;
+
   analyser.getByteTimeDomainData(dataArray);
 
   let sum = 0;
@@ -113,16 +135,18 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
+  // フライング送信
   if (volume < THRESHOLD && !sentEarly && audioChunks.length > 10) {
     sentEarly = true;
     mediaRecorder.stop();
     return;
   }
 
+  // 無音検知
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
-    if (Date.now() - silenceStart > 700) {
+    if (Date.now() - silenceStart > 800) {
       mediaRecorder.stop();
       return;
     }
@@ -133,5 +157,6 @@ function detect() {
   requestAnimationFrame(detect);
 }
 </script>
+
 </body>
 </html>
