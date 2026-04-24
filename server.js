@@ -1,27 +1,39 @@
+const express = require("express");
+const multer = require("multer");
+const fetch = require("node-fetch");
+const FormData = require("form-data");
+
+const app = express(); // ← これが無いと今回のエラー出る
+const upload = multer();
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// ===== API =====
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
+    // ===== STT =====
     const form = new FormData();
-
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
       contentType: "audio/webm"
     });
-
     form.append("model", "whisper-1");
 
     const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
       body: form
     });
 
     const sttData = await sttRes.json();
     const text = sttData.text || "";
+    console.log("認識:", text);
 
+    // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -35,23 +47,24 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const gptData = await gptRes.json();
     const reply = gptData.choices[0].message.content;
+    console.log("返答:", reply);
 
-    // 🔥ここ修正
+    // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model: "gpt-4o-mini-tts",
         voice: "alloy",
         input: reply,
-        format: "mp3"   // ← これ追加（重要）
+        format: "mp3"
       })
     });
 
-    // 🔥 streamで返す（これが安定）
+    // 🔥 ストリームで返す（重要）
     res.set("Content-Type", "audio/mpeg");
     ttsRes.body.pipe(res);
 
@@ -59,4 +72,12 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     console.error(e);
     res.status(500).send("error");
   }
+});
+
+// ===== 静的ファイル =====
+app.use(express.static("public"));
+
+// ===== 起動 =====
+app.listen(process.env.PORT || 3001, () => {
+  console.log("server running");
 });
