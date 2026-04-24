@@ -16,33 +16,28 @@ let audioContext;
 let analyser;
 let dataArray;
 let stream;
-let audioPlayer; // ← 重要
+let audioPlayer;
 
 let silenceStart = null;
 let sentEarly = false;
 
-// ===== 名前取得 =====
 const params = new URLSearchParams(window.location.search);
 const userName = params.get("name") || "ともだち";
 
 const THRESHOLD = 0.005;
 
-// ===== スタート =====
+// ===== START =====
 document.getElementById("start").onclick = async () => {
   console.log("🚀 VAD開始");
 
-  // 🔥 音再生許可を取得（超重要）
-  audioPlayer = new Audio();
-  audioPlayer.muted = false;
+  // 🔥 AudioContextでアンロック（これが最重要）
+  audioContext = new AudioContext();
+  await audioContext.resume();
 
-  try {
-    await audioPlayer.play();
-  } catch (e) {}
-  audioPlayer.pause();
+  audioPlayer = new Audio();
 
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  audioContext = new AudioContext();
   const source = audioContext.createMediaStreamSource(stream);
   analyser = audioContext.createAnalyser();
   source.connect(analyser);
@@ -76,9 +71,11 @@ document.getElementById("start").onclick = async () => {
 
     const url = URL.createObjectURL(await res.blob());
 
-    // 🔥 ここが修正ポイント
+    // 🔥 安定再生
     audioPlayer.src = url;
-    audioPlayer.play();
+    await audioPlayer.play().catch(e => {
+      console.log("再生エラー", e);
+    });
 
     restart();
   };
@@ -87,7 +84,7 @@ document.getElementById("start").onclick = async () => {
   detect();
 };
 
-// ===== ストップ =====
+// ===== STOP =====
 document.getElementById("stop").onclick = () => {
   console.log("⛔ 停止");
   mediaRecorder?.stop();
