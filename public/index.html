@@ -23,33 +23,34 @@ let silenceStart = null;
 let sentEarly = false;
 let isManualStop = false;
 let isRunning = false;
+let recordStartTime = 0;
 
 const params = new URLSearchParams(window.location.search);
 const userName = params.get("name") || "ともだち";
 
-const THRESHOLD = 0.02;
+// 🔥 調整済みパラメータ
+const THRESHOLD = 0.01;
+const SILENCE_TIME = 1200;
+const MIN_RECORD_TIME = 800;
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
-  console.log("🚀 開始");
-
   if (isRunning) return;
+
+  console.log("🚀 開始");
   isRunning = true;
   isManualStop = false;
 
   try {
-    // Audio unlock
     audioContext = new AudioContext();
     await audioContext.resume();
-    console.log("AudioContext OK");
 
-    // 🎤 マイク取得
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     console.log("マイク取得OK");
 
   } catch (e) {
-    console.error("❌ マイクエラー:", e);
-    alert("マイク使えません（許可して）");
+    console.error("マイクエラー:", e);
+    alert("マイク許可して！");
     isRunning = false;
     return;
   }
@@ -76,14 +77,14 @@ document.getElementById("stop").onclick = () => {
   stream?.getTracks().forEach(t => t.stop());
 };
 
-// ===== 録音開始 =====
+// ===== 録音 =====
 function startRecording() {
   console.log("🎤 録音開始");
 
   audioChunks = [];
+  recordStartTime = Date.now();
 
   mediaRecorder = new MediaRecorder(stream);
-  console.log("MediaRecorder作成");
 
   mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
@@ -94,15 +95,17 @@ function startRecording() {
       return;
     }
 
-    console.log("📤 自動送信");
+    const duration = Date.now() - recordStartTime;
 
-    const blob = new Blob(audioChunks, { type: "audio/webm" });
-
-    if (blob.size < 1000) {
-      console.log("小さすぎてスキップ");
+    if (duration < MIN_RECORD_TIME) {
+      console.log("短すぎてスキップ");
       restart();
       return;
     }
+
+    console.log("📤 送信");
+
+    const blob = new Blob(audioChunks, { type: "audio/webm" });
 
     const formData = new FormData();
     formData.append("audio", blob);
@@ -150,20 +153,15 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
-  console.log("volume:", volume);
-
-  if (volume < THRESHOLD && !sentEarly && audioChunks.length > 10) {
-    console.log("⚡ フライング送信");
-    sentEarly = true;
-    mediaRecorder.stop();
-    return;
-  }
-
+  // 無音判定
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
-    if (Date.now() - silenceStart > 800) {
-      console.log("🔇 無音検知");
+    if (
+      Date.now() - silenceStart > SILENCE_TIME &&
+      Date.now() - recordStartTime > MIN_RECORD_TIME
+    ) {
+      console.log("🔇 無音 → 送信");
       mediaRecorder.stop();
       return;
     }
