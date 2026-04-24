@@ -1,213 +1,140 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>よりそいAI（VAD）</title>
+</head>
 <body>
-
-<h2>よりそいAI（VAD）</h2>
-
-<button id="start">会話スタート</button>
-<button id="stop">会話ストップ</button>
+  <h1>よりそいAI（VAD）</h1>
+  <button id="start">会話スタート</button>
+  <button id="stop">会話ストップ</button>
 
 <script>
+let mediaRecorder;
+let audioChunks = [];
 let audioContext;
 let analyser;
-let micStream;
-let mediaRecorder;
-let chunks = [];
+let dataArray;
+let stream;
+let audioPlayer; // ← 重要
 
-let recording = false;
 let silenceStart = null;
-let audioPlayer = null;
-let isPlaying = false;
-let isProcessing = false;
-let isActive = false;
+let sentEarly = false;
+
+// ===== 名前取得 =====
+const params = new URLSearchParams(window.location.search);
+const userName = params.get("name") || "ともだち";
+
+const THRESHOLD = 0.005;
 
 // ===== スタート =====
 document.getElementById("start").onclick = async () => {
-
-  if (isActive) return;
-  isActive = true;
-
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.log("✅ マイクOK");
-  } catch (e) {
-    alert("マイク許可してください");
-    return;
-  }
-
-  audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  await audioContext.resume();
-
-  const source = audioContext.createMediaStreamSource(micStream);
-
-  analyser = audioContext.createAnalyser();
-  analyser.fftSize = 2048;
-
-  source.connect(analyser);
-
   console.log("🚀 VAD開始");
 
-  detectVoice();
+  // 🔥 音再生許可を取得（超重要）
+  audioPlayer = new Audio();
+  audioPlayer.muted = false;
+
+  try {
+    await audioPlayer.play();
+  } catch (e) {}
+  audioPlayer.pause();
+
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  audioContext = new AudioContext();
+  const source = audioContext.createMediaStreamSource(stream);
+  analyser = audioContext.createAnalyser();
+  source.connect(analyser);
+
+  dataArray = new Uint8Array(analyser.fftSize);
+
+  mediaRecorder = new MediaRecorder(stream);
+  audioChunks = [];
+
+  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+  mediaRecorder.onstop = async () => {
+    console.log("📤 送信");
+
+    const blob = new Blob(audioChunks, { type: "audio/webm" });
+
+    if (blob.size < 1000) {
+      console.log("小さすぎてスキップ");
+      restart();
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("audio", blob);
+    formData.append("name", userName);
+
+    const res = await fetch("/api/voice", {
+      method: "POST",
+      body: formData
+    });
+
+    const url = URL.createObjectURL(await res.blob());
+
+    // 🔥 ここが修正ポイント
+    audioPlayer.src = url;
+    audioPlayer.play();
+
+    restart();
+  };
+
+  mediaRecorder.start();
+  detect();
 };
 
 // ===== ストップ =====
 document.getElementById("stop").onclick = () => {
-
-  isActive = false;
-
-  if (mediaRecorder && recording) {
-    mediaRecorder.stop();
-  }
-
-  if (audioPlayer) {
-    audioPlayer.pause();
-  }
-
-  if (micStream) {
-    micStream.getTracks().forEach(track => track.stop());
-  }
-
-  console.log("🛑 停止");
+  console.log("⛔ 停止");
+  mediaRecorder?.stop();
 };
 
+// ===== 再スタート =====
+function restart() {
+  setTimeout(() => {
+    sentEarly = false;
+    silenceStart = null;
+    audioChunks = [];
+    mediaRecorder.start();
+    detect();
+  }, 300);
+}
+
 // ===== VAD =====
-function detectVoice() {
-
-  if (!isActive) return;
-
-  if (isPlaying || isProcessing) {
-    requestAnimationFrame(detectVoice);
-    return;
-  }
-
-  const data = new Uint8Array(analyser.fftSize);
-  analyser.getByteTimeDomainData(data);
+function detect() {
+  analyser.getByteTimeDomainData(dataArray);
 
   let sum = 0;
-  for (let i = 0; i < data.length; i++) {
-    let v = (data[i] - 128) / 128;
-    sum += v * v;
+  for (let i = 0; i < dataArray.length; i++) {
+    let val = (dataArray[i] - 128) / 128;
+    sum += val * val;
   }
-  let volume = Math.sqrt(sum / data.length);
 
-  console.log("volume:", volume);
+  const volume = Math.sqrt(sum / dataArray.length);
 
-  const threshold = 0.05;
+  if (volume < THRESHOLD && !sentEarly && audioChunks.length > 10) {
+    sentEarly = true;
+    mediaRecorder.stop();
+    return;
+  }
 
-  if (volume > threshold) {
-    silenceStart = null;
+  if (volume < THRESHOLD) {
+    if (!silenceStart) silenceStart = Date.now();
 
-    if (!recording) {
-      startRecording();
+    if (Date.now() - silenceStart > 700) {
+      mediaRecorder.stop();
+      return;
     }
-
   } else {
-    if (recording) {
-      if (!silenceStart) {
-        silenceStart = Date.now();
-      } else {
-        if (Date.now() - silenceStart > 1200) {
-          stopRecording();
-        }
-      }
-    }
+    silenceStart = null;
   }
 
-  requestAnimationFrame(detectVoice);
-}
-
-// ===== 録音開始 =====
-function startRecording() {
-  console.log("🎤 録音開始");
-
-  mediaRecorder = new MediaRecorder(micStream, {
-    mimeType: "audio/webm;codecs=opus"
-  });
-
-  chunks = [];
-  recording = true;
-
-  mediaRecorder.ondataavailable = e => {
-    if (e.data.size > 0) chunks.push(e.data);
-  };
-
-  mediaRecorder.onstop = sendAudio;
-
-  mediaRecorder.start();
-}
-
-// ===== 録音停止 =====
-function stopRecording() {
-  console.log("⏹ 録音停止");
-  recording = false;
-  mediaRecorder.stop();
-}
-
-// ===== 送信＆再生 =====
-async function sendAudio() {
-
-  const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
-
-  if (blob.size < 2000) {
-    console.log("無音スキップ");
-    return;
-  }
-
-  isProcessing = true;
-
-  const formData = new FormData();
-  formData.append("audio", blob);
-
-  console.log("📡 送信");
-
-  const res = await fetch("/api/voice", {
-    method: "POST",
-    body: formData
-  });
-
-  const audioBlob = await res.blob();
-
-  console.log("blob size:", audioBlob.size);
-
-  if (audioBlob.size === 0) {
-    console.log("❌ 音声なし");
-    isProcessing = false;
-    return;
-  }
-
-  const url = URL.createObjectURL(audioBlob);
-
-  // 🔥 直接開いて確認も可能
-  console.log("audio url:", url);
-
-  audioPlayer = new Audio(url);
-
-  // 🔥 強制設定
-  audioPlayer.muted = false;
-  audioPlayer.volume = 1.0;
-
-  isPlaying = true;
-
-  audioPlayer.onended = () => {
-    isPlaying = false;
-    isProcessing = false;
-    console.log("🔊 再生終了");
-  };
-
-  audioPlayer.onerror = (e) => {
-    console.log("❌ audioエラー", e);
-  };
-
-  try {
-    await audioPlayer.play();
-    console.log("🔊 再生成功");
-  } catch (e) {
-    console.log("❌ 再生失敗", e);
-    isPlaying = false;
-    isProcessing = false;
-  }
+  requestAnimationFrame(detect);
 }
 </script>
-
 </body>
 </html>
