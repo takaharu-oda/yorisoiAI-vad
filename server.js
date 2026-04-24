@@ -8,10 +8,8 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ===== API =====
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    // ===== STT =====
     const form = new FormData();
     form.append("file", req.file.buffer, {
       filename: "audio.webm",
@@ -29,7 +27,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const text = sttData.text || "";
     console.log("認識:", text);
 
-    // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -54,7 +51,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const reply = gptData.choices[0].message.content;
     console.log("返答:", reply);
 
-    // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -70,8 +66,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     });
 
     res.set("Content-Type", "audio/mpeg");
-
-    // 🔥 即ストリーム再生
     ttsRes.body.pipe(res);
 
   } catch (e) {
@@ -80,10 +74,8 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
   }
 });
 
-// ===== 静的 =====
 app.use(express.static("public"));
 
-// ===== 起動 =====
 app.listen(process.env.PORT || 3001, () => {
   console.log("server running");
 });

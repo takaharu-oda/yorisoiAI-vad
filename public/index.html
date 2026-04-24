@@ -20,7 +20,7 @@ let stream;
 let silenceStart = null;
 let sentEarly = false;
 
-const THRESHOLD = 0.02; // 小さいほど敏感
+const THRESHOLD = 0.02;
 
 document.getElementById("start").onclick = async () => {
   console.log("🚀 VAD開始");
@@ -30,7 +30,6 @@ document.getElementById("start").onclick = async () => {
   audioContext = new AudioContext();
   const source = audioContext.createMediaStreamSource(stream);
   analyser = audioContext.createAnalyser();
-
   source.connect(analyser);
 
   dataArray = new Uint8Array(analyser.fftSize);
@@ -45,7 +44,8 @@ document.getElementById("start").onclick = async () => {
 
     const blob = new Blob(audioChunks, { type: "audio/webm" });
 
-    if (blob.size < 3000) {
+    // 🔥 ゆるめた
+    if (blob.size < 1000) {
       console.log("小さすぎてスキップ");
       return;
     }
@@ -53,19 +53,16 @@ document.getElementById("start").onclick = async () => {
     const formData = new FormData();
     formData.append("audio", blob);
 
-    // 🔥 即再生（無駄待ちしない）
     const res = await fetch("/api/voice", {
       method: "POST",
       body: formData
     });
 
     const url = URL.createObjectURL(await res.blob());
-    const audio = new Audio(url);
-    audio.play();
+    new Audio(url).play();
   };
 
   mediaRecorder.start();
-
   detect();
 };
 
@@ -85,19 +82,19 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
-  // ===== フライング送信 =====
-  if (volume < THRESHOLD && !sentEarly) {
+  // 🔥 フライング（条件付き）
+  if (volume < THRESHOLD && !sentEarly && audioChunks.length > 5) {
     sentEarly = true;
     console.log("⚡ フライング送信");
     mediaRecorder.stop();
     return;
   }
 
-  // ===== 無音検知 =====
+  // 🔥 無音検知（安定版）
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
-    if (Date.now() - silenceStart > 400) { // ←ここ高速化
+    if (Date.now() - silenceStart > 500) {
       console.log("🛑 無音検知");
       mediaRecorder.stop();
       return;
