@@ -8,18 +8,10 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-let history = [];
-
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    const name = req.body?.name;
-    const mode = req.body?.mode;
-
-    // ===== 音声チェック =====
-    if (!req.file || !req.file.buffer) {
-      console.log("❌ audioなし");
-      return res.status(400).send("no audio");
-    }
+    const name = req.body.name;
+    const mode = req.body.mode;
 
     // ===== STT =====
     const form = new FormData();
@@ -31,37 +23,32 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`
-      },
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
       body: form
     });
 
-    const sttData = await sttRes.json().catch(() => ({}));
-    const text = sttData?.text || "";
+    const sttData = await sttRes.json();
+    const text = sttData.text || "";
+    console.log("認識:", text);
 
-    console.log("📝 認識:", text || "(空)");
-
-    // ❌ ←ここが今回の変更（無音でも止めない）
-    // if (!text) {
-    //   return res.status(400).send("no speech");
-    // }
-
-    // ===== 呼び方 =====
+    // ===== 呼び方ロジック =====
     let systemPrompt;
 
     if (mode === "multi") {
-      systemPrompt = `やさしいぬいぐるみ。ときどき「みんなー」と呼ぶ。短く1文。`;
+      const callGroup = Math.random() < 0.4;
+
+      systemPrompt = callGroup
+        ? `あなたはやさしいぬいぐるみ。「みんなー」と優しく呼びかけてもよいが毎回は言わない。短く1文で答える。`
+        : `あなたはやさしいぬいぐるみ。自然に短く1文で答える。`;
     } else if (name) {
-      systemPrompt = `やさしいぬいぐるみ。ときどき「${name}」と呼ぶ。短く1文。`;
+      const shouldCallName = Math.random() < 0.3;
+
+      systemPrompt = shouldCallName
+        ? `あなたはやさしいぬいぐるみ。「${name}」と呼びかけてもよいが毎回は呼ばない。短く1文で答える。`
+        : `あなたはやさしいぬいぐるみ。名前は呼ばずに短く1文で答える。`;
     } else {
-      systemPrompt = `やさしいぬいぐるみ。短く1文。`;
+      systemPrompt = `あなたはやさしいぬいぐるみ。短く1文で答える。`;
     }
-
-    // ===== 履歴 =====
-    history.push({ role: "user", content: text || "..." });
-
-    const safeHistory = history.slice(-6);
 
     // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -76,20 +63,14 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
         max_tokens: 50,
         messages: [
           { role: "system", content: systemPrompt },
-          ...safeHistory
+          { role: "user", content: text }
         ]
       })
     });
 
-    const gptData = await gptRes.json().catch(() => ({}));
-
-    const reply =
-      gptData?.choices?.[0]?.message?.content ||
-      "もう一回話してくれる？";
-
-    console.log("🤖 返答:", reply);
-
-    history.push({ role: "assistant", content: reply });
+    const gptData = await gptRes.json();
+    const reply = gptData.choices[0].message.content;
+    console.log("返答:", reply);
 
     // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
@@ -106,16 +87,12 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
-    if (!ttsRes.ok) {
-      return res.status(500).send("tts error");
-    }
-
     res.set("Content-Type", "audio/mpeg");
     ttsRes.body.pipe(res);
 
   } catch (e) {
-    console.error("🔥 サーバーエラー:", e);
-    res.status(500).send("server error");
+    console.error(e);
+    res.status(500).send("error");
   }
 });
 
