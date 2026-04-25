@@ -189,7 +189,7 @@ function detect() {
 
   // ===== 話し終わり =====
   if (isRecording) {
-    if (volume < THRESHOLD) {
+    if (volume < THRESHOLD = 0.003) {
       if (!silenceStart) silenceStart = Date.now();
 
       if (Date.now() - silenceStart > SILENCE_TIME) {
