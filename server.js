@@ -10,8 +10,12 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    const name = req.body.name;
-    const mode = req.body.mode;
+    // ===== 安全チェック =====
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).send("no audio");
+    }
+
+    const name = req.body.name || "";
 
     // ===== STT =====
     const form = new FormData();
@@ -23,34 +27,27 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
       body: form
     });
 
     const sttData = await sttRes.json();
     const text = sttData.text || "";
+
     console.log("認識:", text);
 
-    // ===== 呼び方ロジック =====
-    let systemPrompt;
-
-    if (mode === "multi") {
-      const callGroup = Math.random() < 0.4;
-
-      systemPrompt = callGroup
-        ? `あなたはやさしいぬいぐるみ。「みんなー」と優しく呼びかけてもよいが毎回は言わない。短く1文で答える。`
-        : `あなたはやさしいぬいぐるみ。自然に短く1文で答える。`;
-    } else if (name) {
-      const shouldCallName = Math.random() < 0.3;
-
-      systemPrompt = shouldCallName
-        ? `あなたはやさしいぬいぐるみ。「${name}」と呼びかけてもよいが毎回は呼ばない。短く1文で答える。`
-        : `あなたはやさしいぬいぐるみ。名前は呼ばずに短く1文で答える。`;
-    } else {
-      systemPrompt = `あなたはやさしいぬいぐるみ。短く1文で答える。`;
+    // 🔥 無音対策（超重要）
+    if (!text || text.trim() === "") {
+      return res.status(400).send("no speech");
     }
 
     // ===== GPT =====
+    const systemPrompt = name
+      ? `あなたはやさしいぬいぐるみ。時々「${name}」と呼びながら、短く1文で答えてください。`
+      : `あなたはやさしいぬいぐるみ。短く1文で答えてください。`;
+
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -69,6 +66,13 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     });
 
     const gptData = await gptRes.json();
+
+    // 🔥 GPTエラー防止
+    if (!gptData.choices || !gptData.choices[0]) {
+      console.log("GPTエラー:", gptData);
+      return res.status(500).send("gpt error");
+    }
+
     const reply = gptData.choices[0].message.content;
     console.log("返答:", reply);
 
@@ -87,8 +91,16 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
+    // 🔥 TTSエラー防止
+    if (!ttsRes.ok) {
+      console.log("TTSエラー");
+      return res.status(500).send("tts error");
+    }
+
+    // 🔥 安全な音声返却（pipeやめる）
+    const buffer = await ttsRes.arrayBuffer();
     res.set("Content-Type", "audio/mpeg");
-    ttsRes.body.pipe(res);
+    res.send(Buffer.from(buffer));
 
   } catch (e) {
     console.error(e);
