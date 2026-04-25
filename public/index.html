@@ -24,12 +24,12 @@ let isManualStop = false;
 let isRunning = false;
 let isPlaying = false;
 let recordStartTime = 0;
-let hasSpoken = false; // 🔥 追加
+let hasSpoken = false;
 
 const userName = new URLSearchParams(window.location.search).get("name");
 
-// 🔥 調整済み
-const THRESHOLD = 0.02;
+// 🔥 最適値（今回の修正）
+const THRESHOLD = 0.005;
 const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
 
@@ -86,7 +86,7 @@ function startRecording() {
 
   audioChunks = [];
   recordStartTime = Date.now();
-  hasSpoken = false; // 🔥 リセット
+  hasSpoken = false;
 
   mediaRecorder = new MediaRecorder(stream);
 
@@ -95,6 +95,13 @@ function startRecording() {
   mediaRecorder.onstop = async () => {
 
     if (isManualStop) return;
+
+    // 🔥 しゃべってないなら送らない
+    if (!hasSpoken) {
+      console.log("喋ってないのでスキップ");
+      restart();
+      return;
+    }
 
     const duration = Date.now() - recordStartTime;
     if (duration < MIN_RECORD_TIME) {
@@ -179,7 +186,7 @@ function detect() {
     if (!silenceStart) silenceStart = Date.now();
 
     if (
-      hasSpoken && // ← これが核心
+      hasSpoken &&
       Date.now() - silenceStart > SILENCE_TIME &&
       Date.now() - recordStartTime > MIN_RECORD_TIME
     ) {
