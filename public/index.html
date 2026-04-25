@@ -28,11 +28,9 @@ let hasSpoken = false;
 
 const userName = new URLSearchParams(window.location.search).get("name");
 
-// 🔥 ここが最重要（2段階判定）
-const SPEAK_THRESHOLD = 0.01;    // 喋り判定
-const SILENCE_THRESHOLD = 0.003; // 無音判定
-
-const SILENCE_TIME = 800;
+// 🔥 一旦これに固定（これが正解）
+const THRESHOLD = 0.005;
+const SILENCE_TIME = 1000;
 const MIN_RECORD_TIME = 800;
 
 // ===== START =====
@@ -178,13 +176,13 @@ function detect() {
   const volume = Math.sqrt(sum / dataArray.length);
   console.log("volume:", volume);
 
-  // 🔥 喋り判定（強め）
-  if (volume > SPEAK_THRESHOLD) {
+  // 喋り検知
+  if (volume > THRESHOLD) {
     hasSpoken = true;
   }
 
-  // 🔥 無音判定（弱め）
-  if (volume < SILENCE_THRESHOLD) {
+  // 無音検知
+  if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
     if (
@@ -200,6 +198,12 @@ function detect() {
     silenceStart = null;
   }
 
+  requestAnimationFrame(detect);
+}
+</script>
+
+</body>
+</html>
   requestAnimationFrame(detect);
 }
 </script>
