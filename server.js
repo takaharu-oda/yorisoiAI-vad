@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const fetch = require("node-fetch");
 const FormData = require("form-data");
+const { Readable } = require("stream");
 
 const app = express();
 const upload = multer();
@@ -19,10 +20,15 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     // ===== STT =====
     const form = new FormData();
-    form.append("file", req.file.buffer, {
+
+    // 🔥 Buffer → Stream（超重要）
+    const audioStream = Readable.from(req.file.buffer);
+
+    form.append("file", audioStream, {
       filename: "audio.webm",
       contentType: "audio/webm"
     });
+
     form.append("model", "whisper-1");
 
     const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -38,7 +44,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     console.log("認識:", text);
 
-    // 🔥 無音対策（超重要）
+    // 🔥 無音対策
     if (!text || text.trim() === "") {
       return res.status(400).send("no speech");
     }
@@ -67,7 +73,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const gptData = await gptRes.json();
 
-    // 🔥 GPTエラー防止
     if (!gptData.choices || !gptData.choices[0]) {
       console.log("GPTエラー:", gptData);
       return res.status(500).send("gpt error");
@@ -91,13 +96,12 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
-    // 🔥 TTSエラー防止
     if (!ttsRes.ok) {
       console.log("TTSエラー");
       return res.status(500).send("tts error");
     }
 
-    // 🔥 安全な音声返却（pipeやめる）
+    // 🔥 安定返却
     const buffer = await ttsRes.arrayBuffer();
     res.set("Content-Type", "audio/mpeg");
     res.send(Buffer.from(buffer));
