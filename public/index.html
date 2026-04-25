@@ -24,10 +24,11 @@ let isManualStop = false;
 let isRunning = false;
 let isPlaying = false;
 let recordStartTime = 0;
+let hasSpoken = false; // 🔥 追加
 
 const userName = new URLSearchParams(window.location.search).get("name");
 
-// 🔥 調整済み（ここが重要）
+// 🔥 調整済み
 const THRESHOLD = 0.02;
 const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
@@ -85,6 +86,7 @@ function startRecording() {
 
   audioChunks = [];
   recordStartTime = Date.now();
+  hasSpoken = false; // 🔥 リセット
 
   mediaRecorder = new MediaRecorder(stream);
 
@@ -167,10 +169,17 @@ function detect() {
   const volume = Math.sqrt(sum / dataArray.length);
   console.log("volume:", volume);
 
+  // 🔥 しゃべった判定
+  if (volume > THRESHOLD) {
+    hasSpoken = true;
+  }
+
+  // 🔥 無音判定
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
     if (
+      hasSpoken && // ← これが核心
       Date.now() - silenceStart > SILENCE_TIME &&
       Date.now() - recordStartTime > MIN_RECORD_TIME
     ) {
