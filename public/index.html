@@ -28,8 +28,9 @@ let hasSpoken = false;
 
 const userName = new URLSearchParams(window.location.search).get("name");
 
-const THRESHOLD = 0.005;
-const SILENCE_TIME = 1000;
+// 🔥 今のあなた用ベスト設定
+const THRESHOLD = 0.01;
+const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
 
 // ===== START =====
@@ -87,7 +88,7 @@ function startRecording() {
   recordStartTime = Date.now();
   hasSpoken = false;
 
-  // 🔥 フォーマット指定（超重要）
+  // 🔥 フォーマット固定
   mediaRecorder = new MediaRecorder(stream, {
     mimeType: "audio/webm;codecs=opus"
   });
@@ -114,7 +115,6 @@ function startRecording() {
 
     console.log("📤 送信");
 
-    // 🔥 フォーマット揃える
     const blob = new Blob(audioChunks, {
       type: "audio/webm;codecs=opus"
     });
@@ -182,10 +182,12 @@ function detect() {
   const volume = Math.sqrt(sum / dataArray.length);
   console.log("volume:", volume);
 
+  // 喋り検知
   if (volume > THRESHOLD) {
     hasSpoken = true;
   }
 
+  // 無音検知
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
