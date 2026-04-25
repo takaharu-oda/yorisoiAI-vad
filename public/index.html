@@ -28,8 +28,9 @@ let hasSpoken = false;
 
 const userName = new URLSearchParams(window.location.search).get("name");
 
-// 🔥 今のあなた用ベスト設定
+// 🔥 設定
 const THRESHOLD = 0.01;
+const SPEAK_MIN = 0.03;   // ← ノイズ除去の核心
 const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
 
@@ -88,7 +89,6 @@ function startRecording() {
   recordStartTime = Date.now();
   hasSpoken = false;
 
-  // 🔥 フォーマット固定
   mediaRecorder = new MediaRecorder(stream, {
     mimeType: "audio/webm;codecs=opus"
   });
@@ -101,8 +101,9 @@ function startRecording() {
 
     if (isManualStop) return;
 
+    // 🔥 ノイズ防止
     if (!hasSpoken) {
-      console.log("喋ってないのでスキップ");
+      console.log("ノイズだけなのでスキップ");
       restart();
       return;
     }
@@ -182,12 +183,12 @@ function detect() {
   const volume = Math.sqrt(sum / dataArray.length);
   console.log("volume:", volume);
 
-  // 喋り検知
-  if (volume > THRESHOLD) {
+  // 🔥 本当の喋り判定（ここが核心）
+  if (volume > SPEAK_MIN) {
     hasSpoken = true;
   }
 
-  // 無音検知
+  // 無音判定
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
