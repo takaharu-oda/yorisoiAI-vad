@@ -17,20 +17,14 @@ let audioContext;
 let analyser;
 let dataArray;
 let stream;
-let audioPlayer;
 
 let silenceStart = null;
-let isManualStop = false;
 let isRunning = false;
-let isPlaying = false;
 let recordStartTime = 0;
 let hasSpoken = false;
 
-const userName = new URLSearchParams(window.location.search).get("name");
-
-// 🔥 設定
 const THRESHOLD = 0.01;
-const SPEAK_MIN = 0.03;   // ← ノイズ除去の核心
+const SPEAK_MIN = 0.03;
 const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
 
@@ -40,23 +34,11 @@ document.getElementById("start").onclick = async () => {
 
   console.log("🚀 開始");
   isRunning = true;
-  isManualStop = false;
 
-  try {
-    audioContext = new AudioContext();
-    await audioContext.resume();
+  audioContext = new AudioContext();
+  await audioContext.resume();
 
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.log("マイク取得OK");
-
-  } catch (e) {
-    console.error("マイクエラー:", e);
-    alert("マイク許可して！");
-    isRunning = false;
-    return;
-  }
-
-  audioPlayer = new Audio();
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   const source = audioContext.createMediaStreamSource(stream);
   analyser = audioContext.createAnalyser();
@@ -70,11 +52,7 @@ document.getElementById("start").onclick = async () => {
 
 // ===== STOP =====
 document.getElementById("stop").onclick = () => {
-  console.log("⛔ 停止");
-
-  isManualStop = true;
   isRunning = false;
-
   mediaRecorder?.stop();
   stream?.getTracks().forEach(t => t.stop());
 };
@@ -97,13 +75,10 @@ function startRecording() {
     if (e.data.size > 0) audioChunks.push(e.data);
   };
 
-  mediaRecorder.onstop = async () => {
+  mediaRecorder.onstop = () => {
 
-    if (isManualStop) return;
-
-    // 🔥 ノイズ防止
     if (!hasSpoken) {
-      console.log("ノイズだけなのでスキップ");
+      console.log("ノイズなのでスキップ");
       restart();
       return;
     }
@@ -114,63 +89,39 @@ function startRecording() {
       return;
     }
 
-    console.log("📤 送信");
+    console.log("📦 録音データ作成");
 
     const blob = new Blob(audioChunks, {
       type: "audio/webm;codecs=opus"
     });
 
-    const formData = new FormData();
-    formData.append("audio", blob, "audio.webm");
-    formData.append("name", userName || "");
+    console.log("BLOB SIZE:", blob.size);
 
-    const res = await fetch("/api/voice", {
-      method: "POST",
-      body: formData
-    });
+    // 🔥 ダウンロード（ここが今回の核心）
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "test.webm";
+    a.click();
 
-    if (!res.ok) {
-      console.log("APIエラー");
-      restart();
-      return;
-    }
-
-    const blobRes = await res.blob();
-
-    if (blobRes.size < 1000) {
-      console.log("音声小さすぎ");
-      restart();
-      return;
-    }
-
-    const url = URL.createObjectURL(blobRes);
-
-    isPlaying = true;
-
-    audioPlayer.src = url;
-    await audioPlayer.play().catch(e => console.log("再生エラー", e));
-
-    audioPlayer.onended = () => {
-      isPlaying = false;
-      setTimeout(() => restart(), 300);
-    };
+    restart();
   };
 
-  mediaRecorder.start();
+  // 🔥 これ重要（データをちゃんと貯める）
+  mediaRecorder.start(100);
+
   detect();
 }
 
 // ===== 再スタート =====
 function restart() {
-  if (!isRunning || isPlaying) return;
-
+  if (!isRunning) return;
   silenceStart = null;
   startRecording();
 }
 
 // ===== VAD =====
 function detect() {
-  if (!isRunning || isPlaying) return;
+  if (!isRunning) return;
 
   analyser.getByteTimeDomainData(dataArray);
 
@@ -183,7 +134,7 @@ function detect() {
   const volume = Math.sqrt(sum / dataArray.length);
   console.log("volume:", volume);
 
-  // 🔥 本当の喋り判定（ここが核心）
+  // 喋り判定
   if (volume > SPEAK_MIN) {
     hasSpoken = true;
   }
@@ -197,7 +148,7 @@ function detect() {
       Date.now() - silenceStart > SILENCE_TIME &&
       Date.now() - recordStartTime > MIN_RECORD_TIME
     ) {
-      console.log("🔇 無音 → 送信");
+      console.log("🔇 無音 → stop");
       mediaRecorder.stop();
       return;
     }
