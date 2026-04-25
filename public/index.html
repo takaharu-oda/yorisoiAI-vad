@@ -28,7 +28,6 @@ let hasSpoken = false;
 
 const userName = new URLSearchParams(window.location.search).get("name");
 
-// 🔥 一旦これに固定（これが正解）
 const THRESHOLD = 0.005;
 const SILENCE_TIME = 1000;
 const MIN_RECORD_TIME = 800;
@@ -88,15 +87,19 @@ function startRecording() {
   recordStartTime = Date.now();
   hasSpoken = false;
 
-  mediaRecorder = new MediaRecorder(stream);
+  // 🔥 フォーマット指定（超重要）
+  mediaRecorder = new MediaRecorder(stream, {
+    mimeType: "audio/webm;codecs=opus"
+  });
 
-  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0) audioChunks.push(e.data);
+  };
 
   mediaRecorder.onstop = async () => {
 
     if (isManualStop) return;
 
-    // 🔥 喋ってないなら送らない
     if (!hasSpoken) {
       console.log("喋ってないのでスキップ");
       restart();
@@ -111,10 +114,13 @@ function startRecording() {
 
     console.log("📤 送信");
 
-    const blob = new Blob(audioChunks, { type: "audio/webm" });
+    // 🔥 フォーマット揃える
+    const blob = new Blob(audioChunks, {
+      type: "audio/webm;codecs=opus"
+    });
 
     const formData = new FormData();
-    formData.append("audio", blob);
+    formData.append("audio", blob, "audio.webm");
     formData.append("name", userName || "");
 
     const res = await fetch("/api/voice", {
@@ -176,12 +182,10 @@ function detect() {
   const volume = Math.sqrt(sum / dataArray.length);
   console.log("volume:", volume);
 
-  // 喋り検知
   if (volume > THRESHOLD) {
     hasSpoken = true;
   }
 
-  // 無音検知
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
@@ -198,12 +202,6 @@ function detect() {
     silenceStart = null;
   }
 
-  requestAnimationFrame(detect);
-}
-</script>
-
-</body>
-</html>
   requestAnimationFrame(detect);
 }
 </script>
