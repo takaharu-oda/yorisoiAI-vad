@@ -1,167 +1,44 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<title>よりそいAI</title>
-</head>
-<body>
-
-<h1>よりそいAI</h1>
-<button id="start">会話スタート</button>
-<button id="stop">会話ストップ</button>
-
 <script>
-let mediaRecorder;
-let audioChunks = [];
-let audioContext;
-let analyser;
-let dataArray;
-let stream;
-let audioPlayer;
+mediaRecorder.onstop = async () => {
 
-let silenceStart = null;
-let isManualStop = false;
-let isRunning = false;
-let isPlaying = false;
-let recordStartTime = 0;
+  if (isManualStop) return;
 
-const params = new URLSearchParams(window.location.search);
-const userName = params.get("name");
-const mode = params.get("mode");
-
-// 調整値
-const THRESHOLD = 0.01;
-const SILENCE_TIME = 1200;
-const MIN_RECORD_TIME = 800;
-
-// ===== START =====
-document.getElementById("start").onclick = async () => {
-  if (isRunning) return;
-
-  console.log("🚀 開始");
-  isRunning = true;
-  isManualStop = false;
-
-  try {
-    audioContext = new AudioContext();
-    await audioContext.resume();
-
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-  } catch (e) {
-    alert("マイク許可して！");
-    isRunning = false;
+  const duration = Date.now() - recordStartTime;
+  if (duration < MIN_RECORD_TIME) {
+    restart();
     return;
   }
 
-  audioPlayer = new Audio();
+  console.log("📤 送信");
 
-  const source = audioContext.createMediaStreamSource(stream);
-  analyser = audioContext.createAnalyser();
-  source.connect(analyser);
+  const blob = new Blob(audioChunks, { type: "audio/webm" });
 
-  dataArray = new Uint8Array(analyser.fftSize);
+  const formData = new FormData();
+  formData.append("audio", blob);
+  formData.append("name", userName || "");
 
-  startRecording();
-};
+  const res = await fetch("/api/voice", {
+    method: "POST",
+    body: formData
+  });
 
-// ===== STOP =====
-document.getElementById("stop").onclick = () => {
-  isManualStop = true;
-  isRunning = false;
+  // 🔥 これ追加（超重要）
+  if (!res.ok) {
+    console.log("APIエラー");
+    restart();
+    return;
+  }
 
-  mediaRecorder?.stop();
-  stream?.getTracks().forEach(t => t.stop());
-};
+  const url = URL.createObjectURL(await res.blob());
 
-// ===== 録音 =====
-function startRecording() {
-  if (!isRunning) return;
+  isPlaying = true;
 
-  audioChunks = [];
-  recordStartTime = Date.now();
+  audioPlayer.src = url;
+  await audioPlayer.play().catch(e => console.log("再生エラー", e));
 
-  mediaRecorder = new MediaRecorder(stream);
-
-  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-
-  mediaRecorder.onstop = async () => {
-    if (isManualStop) return;
-
-    const duration = Date.now() - recordStartTime;
-    if (duration < MIN_RECORD_TIME) {
-      restart();
-      return;
-    }
-
-    const blob = new Blob(audioChunks, { type: "audio/webm" });
-
-    const formData = new FormData();
-    formData.append("audio", blob);
-    formData.append("name", userName || "");
-    formData.append("mode", mode || "");
-
-    const res = await fetch("/api/voice", {
-      method: "POST",
-      body: formData
-    });
-
-    const url = URL.createObjectURL(await res.blob());
-
-    isPlaying = true;
-
-    audioPlayer.src = url;
-    await audioPlayer.play();
-
-    audioPlayer.onended = () => {
-      isPlaying = false;
-      setTimeout(() => restart(), 300);
-    };
+  audioPlayer.onended = () => {
+    isPlaying = false;
+    setTimeout(() => restart(), 300);
   };
-
-  mediaRecorder.start();
-  detect();
-}
-
-// ===== 再スタート =====
-function restart() {
-  if (!isRunning || isPlaying) return;
-
-  silenceStart = null;
-  startRecording();
-}
-
-// ===== VAD =====
-function detect() {
-  if (!isRunning || isPlaying) return;
-
-  analyser.getByteTimeDomainData(dataArray);
-
-  let sum = 0;
-  for (let i = 0; i < dataArray.length; i++) {
-    let val = (dataArray[i] - 128) / 128;
-    sum += val * val;
-  }
-
-  const volume = Math.sqrt(sum / dataArray.length);
-
-  if (volume < THRESHOLD) {
-    if (!silenceStart) silenceStart = Date.now();
-
-    if (
-      Date.now() - silenceStart > SILENCE_TIME &&
-      Date.now() - recordStartTime > MIN_RECORD_TIME
-    ) {
-      mediaRecorder.stop();
-      return;
-    }
-  } else {
-    silenceStart = null;
-  }
-
-  requestAnimationFrame(detect);
-}
+};
 </script>
-
-</body>
-</html>
