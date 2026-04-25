@@ -27,9 +27,9 @@ let recordStartTime = 0;
 
 const userName = new URLSearchParams(window.location.search).get("name");
 
-// ===== 調整値 =====
-const THRESHOLD = 0.005;
-const SILENCE_TIME = 1200;
+// 🔥 調整済み（ここが重要）
+const THRESHOLD = 0.02;
+const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
 
 // ===== START =====
@@ -113,7 +113,6 @@ function startRecording() {
       body: formData
     });
 
-    // 🔥 エラー対策
     if (!res.ok) {
       console.log("APIエラー");
       restart();
