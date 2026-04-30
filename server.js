@@ -9,16 +9,20 @@ const upload = multer({ dest: "uploads/" });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// 静的ファイル
 app.use(express.static("public"));
 
 app.post("/upload", upload.single("audio"), async (req, res) => {
   const filePath = req.file.path;
 
   try {
-    // ===== ① 音声 → テキスト =====
+    console.log("file size:", fs.statSync(filePath).size);
+
+    // ===== ① Whisper =====
     const formData = new FormData();
-    formData.append("file", fs.createReadStream(filePath));
+    formData.append("file", fs.createReadStream(filePath), {
+      filename: "audio.webm",
+      contentType: "audio/webm"
+    });
     formData.append("model", "gpt-4o-mini-transcribe");
 
     const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -30,7 +34,15 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
     });
 
     const whisperData = await whisperRes.json();
-    const userText = whisperData.text || "";
+    console.log("whisper:", whisperData);
+
+    const userText = whisperData.text;
+
+    if (!userText) {
+      console.error("❌ transcription failed");
+      fs.unlinkSync(filePath);
+      return res.status(500).send("transcription failed");
+    }
 
     console.log("USER:", userText);
 
@@ -46,7 +58,7 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "あなたは優しく寄り添うぬいぐるみのAIです。短く優しく話してください。"
+            content: "あなたは優しく寄り添うぬいぐるみのAIです。短くやさしく答えてください。"
           },
           { role: "user", content: userText }
         ]
@@ -54,11 +66,19 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
     });
 
     const chatData = await chatRes.json();
-    const reply = chatData.choices[0].message.content;
+    console.log("chat:", chatData);
+
+    const reply = chatData?.choices?.[0]?.message?.content;
+
+    if (!reply) {
+      console.error("❌ chat failed");
+      fs.unlinkSync(filePath);
+      return res.status(500).send("chat failed");
+    }
 
     console.log("AI:", reply);
 
-    // ===== ③ 音声生成 =====
+    // ===== ③ TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -72,16 +92,26 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
       })
     });
 
+    if (!ttsRes.ok) {
+      console.error("❌ TTS failed");
+      fs.unlinkSync(filePath);
+      return res.status(500).send("tts failed");
+    }
+
     const audioBuffer = await ttsRes.arrayBuffer();
 
     fs.unlinkSync(filePath);
 
-    res.set({ "Content-Type": "audio/mpeg" });
+    res.set({
+      "Content-Type": "audio/mpeg"
+    });
+
     res.send(Buffer.from(audioBuffer));
 
   } catch (err) {
-    console.error(err);
-    res.status(500).send("error");
+    console.error("🔥 SERVER ERROR:", err);
+    fs.existsSync(filePath) && fs.unlinkSync(filePath);
+    res.status(500).send("server error");
   }
 });
 

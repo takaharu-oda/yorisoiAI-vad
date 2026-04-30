@@ -16,13 +16,6 @@ let audioChunks = [];
 let stream;
 let isRunning = false;
 
-// ===== AI初回発話 =====
-async function speakFirst() {
-  const audio = new Audio();
-  audio.src = "/start.mp3"; // ←なくてもOK
-  try { await audio.play(); } catch {}
-}
-
 // ===== サーバー送信 =====
 async function sendToServer(blob) {
   const formData = new FormData();
@@ -33,19 +26,32 @@ async function sendToServer(blob) {
     body: formData
   });
 
-  const audioBlob = await res.blob();
-  const audioUrl = URL.createObjectURL(audioBlob);
+  if (!res.ok) {
+    console.error("❌ server error");
+    return;
+  }
 
+  const audioBlob = await res.blob();
+
+  if (audioBlob.size === 0) {
+    console.error("❌ empty audio");
+    return;
+  }
+
+  const audioUrl = URL.createObjectURL(audioBlob);
   const audio = new Audio(audioUrl);
-  await audio.play();
+
+  try {
+    await audio.play();
+  } catch (e) {
+    console.error("❌ audio play failed", e);
+  }
 }
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
   if (isRunning) return;
   isRunning = true;
-
-  await speakFirst();
 
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -82,7 +88,7 @@ function startRecording() {
 
   setTimeout(() => {
     mediaRecorder.stop();
-  }, 3000); // とりあえず3秒録音（VAD後で戻せる）
+  }, 3000);
 }
 </script>
 
