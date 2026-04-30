@@ -23,10 +23,23 @@ let isRunning = false;
 let recordStartTime = 0;
 let hasSpoken = false;
 
+// 🔥 調整済みパラメータ（ここ重要）
 const THRESHOLD = 0.01;
-const SPEAK_MIN = 0.03;
+const SPEAK_MIN = 0.05;
 const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
+
+// ===== AIが喋る =====
+function speak(text) {
+  return new Promise((resolve) => {
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = "ja-JP";
+    utter.rate = 1.0;
+    utter.pitch = 1.1;
+    utter.onend = resolve;
+    speechSynthesis.speak(utter);
+  });
+}
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
@@ -34,6 +47,9 @@ document.getElementById("start").onclick = async () => {
 
   console.log("🚀 開始");
   isRunning = true;
+
+  // 🔥 AIが先に喋る
+  await speak("こんにちは、今日はどうしたの？");
 
   audioContext = new AudioContext();
   await audioContext.resume();
@@ -67,23 +83,15 @@ function startRecording() {
   recordStartTime = Date.now();
   hasSpoken = false;
 
-  mediaRecorder = new MediaRecorder(stream, {
-    mimeType: "audio/webm;codecs=opus"
-  });
+  mediaRecorder = new MediaRecorder(stream);
 
   mediaRecorder.ondataavailable = e => {
     if (e.data.size > 0) audioChunks.push(e.data);
   };
 
   mediaRecorder.onstop = () => {
-
-    if (!hasSpoken) {
-      console.log("ノイズなのでスキップ");
-      restart();
-      return;
-    }
-
     const duration = Date.now() - recordStartTime;
+
     if (duration < MIN_RECORD_TIME) {
       restart();
       return;
@@ -92,23 +100,21 @@ function startRecording() {
     console.log("📦 録音データ作成");
 
     const blob = new Blob(audioChunks, {
-      type: "audio/webm;codecs=opus"
+      type: "audio/webm"
     });
 
     console.log("BLOB SIZE:", blob.size);
 
-    // 🔥 ダウンロード（ここが今回の核心）
+    // ダウンロード
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "test.webm";
+    a.download = "voice.webm";
     a.click();
 
     restart();
   };
 
-  // 🔥 これ重要（データをちゃんと貯める）
   mediaRecorder.start(100);
-
   detect();
 }
 
