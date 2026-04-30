@@ -1,119 +1,88 @@
-const express = require("express");
-const multer = require("multer");
-const fetch = require("node-fetch");
-const FormData = require("form-data");
-const { Readable } = require("stream");
+import express from "express";
+import multer from "multer";
+import fs from "fs";
+import fetch from "node-fetch";
+import FormData from "form-data";
 
 const app = express();
-const upload = multer();
+const upload = multer({ dest: "uploads/" });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-app.post("/api/voice", upload.single("audio"), async (req, res) => {
+// 静的ファイル
+app.use(express.static("public"));
+
+app.post("/upload", upload.single("audio"), async (req, res) => {
+  const filePath = req.file.path;
+
   try {
-    // ===== 安全チェック =====
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).send("no audio");
-    }
+    // ===== ① 音声 → テキスト =====
+    const formData = new FormData();
+    formData.append("file", fs.createReadStream(filePath));
+    formData.append("model", "gpt-4o-mini-transcribe");
 
-    const name = req.body.name || "";
-
-    // ===== STT =====
-    const form = new FormData();
-
-    // 🔥 Buffer → Stream（超重要）
-    const audioStream = Readable.from(req.file.buffer);
-
-    form.append("file", audioStream, {
-      filename: "audio.webm",
-      contentType: "audio/webm"
-    });
-
-    form.append("model", "whisper-1");
-
-    const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`
       },
-      body: form
+      body: formData
     });
 
-    const sttData = await sttRes.json();
-    const text = sttData.text || "";
+    const whisperData = await whisperRes.json();
+    const userText = whisperData.text || "";
 
-    console.log("認識:", text);
+    console.log("USER:", userText);
 
-    // 🔥 無音対策
-    if (!text || text.trim() === "") {
-      return res.status(400).send("no speech");
-    }
-
-    // ===== GPT =====
-    const systemPrompt = name
-      ? `あなたはやさしいぬいぐるみ。時々「${name}」と呼びながら、短く1文で答えてください。`
-      : `あなたはやさしいぬいぐるみ。短く1文で答えてください。`;
-
-    const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    // ===== ② GPT =====
+    const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        temperature: 0.3,
-        max_tokens: 50,
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: text }
+          {
+            role: "system",
+            content: "あなたは優しく寄り添うぬいぐるみのAIです。短く優しく話してください。"
+          },
+          { role: "user", content: userText }
         ]
       })
     });
 
-    const gptData = await gptRes.json();
+    const chatData = await chatRes.json();
+    const reply = chatData.choices[0].message.content;
 
-    if (!gptData.choices || !gptData.choices[0]) {
-      console.log("GPTエラー:", gptData);
-      return res.status(500).send("gpt error");
-    }
+    console.log("AI:", reply);
 
-    const reply = gptData.choices[0].message.content;
-    console.log("返答:", reply);
-
-    // ===== TTS =====
+    // ===== ③ 音声生成 =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         model: "gpt-4o-mini-tts",
         voice: "alloy",
-        input: reply,
-        format: "mp3"
+        input: reply
       })
     });
 
-    if (!ttsRes.ok) {
-      console.log("TTSエラー");
-      return res.status(500).send("tts error");
-    }
+    const audioBuffer = await ttsRes.arrayBuffer();
 
-    // 🔥 安定返却
-    const buffer = await ttsRes.arrayBuffer();
-    res.set("Content-Type", "audio/mpeg");
-    res.send(Buffer.from(buffer));
+    fs.unlinkSync(filePath);
 
-  } catch (e) {
-    console.error(e);
+    res.set({ "Content-Type": "audio/mpeg" });
+    res.send(Buffer.from(audioBuffer));
+
+  } catch (err) {
+    console.error(err);
     res.status(500).send("error");
   }
 });
 
-app.use(express.static("public"));
-
-app.listen(process.env.PORT || 3001, () => {
-  console.log("server running");
-});
+app.listen(3000, () => console.log("server started"));

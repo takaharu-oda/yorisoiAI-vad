@@ -2,66 +2,52 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI（VAD）</title>
+<title>よりそいAI</title>
 </head>
 <body>
 
-<h1>よりそいAI（VAD）</h1>
+<h1>よりそいAI</h1>
 <button id="start">会話スタート</button>
 <button id="stop">会話ストップ</button>
 
 <script>
 let mediaRecorder;
 let audioChunks = [];
-let audioContext;
-let analyser;
-let dataArray;
 let stream;
-
-let silenceStart = null;
 let isRunning = false;
-let recordStartTime = 0;
-let hasSpoken = false;
 
-// 🔥 調整済みパラメータ（ここ重要）
-const THRESHOLD = 0.01;
-const SPEAK_MIN = 0.05;
-const SILENCE_TIME = 800;
-const MIN_RECORD_TIME = 800;
+// ===== AI初回発話 =====
+async function speakFirst() {
+  const audio = new Audio();
+  audio.src = "/start.mp3"; // ←なくてもOK
+  try { await audio.play(); } catch {}
+}
 
-// ===== AIが喋る =====
-function speak(text) {
-  return new Promise((resolve) => {
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = "ja-JP";
-    utter.rate = 1.0;
-    utter.pitch = 1.1;
-    utter.onend = resolve;
-    speechSynthesis.speak(utter);
+// ===== サーバー送信 =====
+async function sendToServer(blob) {
+  const formData = new FormData();
+  formData.append("audio", blob, "voice.webm");
+
+  const res = await fetch("/upload", {
+    method: "POST",
+    body: formData
   });
+
+  const audioBlob = await res.blob();
+  const audioUrl = URL.createObjectURL(audioBlob);
+
+  const audio = new Audio(audioUrl);
+  await audio.play();
 }
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
   if (isRunning) return;
-
-  console.log("🚀 開始");
   isRunning = true;
 
-  // 🔥 AIが先に喋る
-  await speak("こんにちは、今日はどうしたの？");
-
-  audioContext = new AudioContext();
-  await audioContext.resume();
+  await speakFirst();
 
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-  const source = audioContext.createMediaStreamSource(stream);
-  analyser = audioContext.createAnalyser();
-  analyser.fftSize = 2048;
-  source.connect(analyser);
-
-  dataArray = new Uint8Array(analyser.fftSize);
 
   startRecording();
 };
@@ -77,11 +63,7 @@ document.getElementById("stop").onclick = () => {
 function startRecording() {
   if (!isRunning) return;
 
-  console.log("🎤 録音開始");
-
   audioChunks = [];
-  recordStartTime = Date.now();
-  hasSpoken = false;
 
   mediaRecorder = new MediaRecorder(stream);
 
@@ -89,80 +71,18 @@ function startRecording() {
     if (e.data.size > 0) audioChunks.push(e.data);
   };
 
-  mediaRecorder.onstop = () => {
-    const duration = Date.now() - recordStartTime;
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(audioChunks, { type: "audio/webm" });
+    await sendToServer(blob);
 
-    if (duration < MIN_RECORD_TIME) {
-      restart();
-      return;
-    }
-
-    console.log("📦 録音データ作成");
-
-    const blob = new Blob(audioChunks, {
-      type: "audio/webm"
-    });
-
-    console.log("BLOB SIZE:", blob.size);
-
-    // ダウンロード
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "voice.webm";
-    a.click();
-
-    restart();
+    if (isRunning) startRecording();
   };
 
-  mediaRecorder.start(100);
-  detect();
-}
+  mediaRecorder.start();
 
-// ===== 再スタート =====
-function restart() {
-  if (!isRunning) return;
-  silenceStart = null;
-  startRecording();
-}
-
-// ===== VAD =====
-function detect() {
-  if (!isRunning) return;
-
-  analyser.getByteTimeDomainData(dataArray);
-
-  let sum = 0;
-  for (let i = 0; i < dataArray.length; i++) {
-    let val = (dataArray[i] - 128) / 128;
-    sum += val * val;
-  }
-
-  const volume = Math.sqrt(sum / dataArray.length);
-  console.log("volume:", volume);
-
-  // 喋り判定
-  if (volume > SPEAK_MIN) {
-    hasSpoken = true;
-  }
-
-  // 無音判定
-  if (volume < THRESHOLD) {
-    if (!silenceStart) silenceStart = Date.now();
-
-    if (
-      hasSpoken &&
-      Date.now() - silenceStart > SILENCE_TIME &&
-      Date.now() - recordStartTime > MIN_RECORD_TIME
-    ) {
-      console.log("🔇 無音 → stop");
-      mediaRecorder.stop();
-      return;
-    }
-  } else {
-    silenceStart = null;
-  }
-
-  requestAnimationFrame(detect);
+  setTimeout(() => {
+    mediaRecorder.stop();
+  }, 3000); // とりあえず3秒録音（VAD後で戻せる）
 }
 </script>
 
