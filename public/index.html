@@ -11,154 +11,99 @@
 <button id="stop">会話ストップ</button>
 
 <script>
-let audioContext;
-let processor;
-let input;
-let stream;
-let isRecording = false;
+let audioContext, processor, input, stream;
 let audioData = [];
+let isRecording = false;
 let startTime = 0;
 
-// ===== 録音開始 =====
 async function startRecording() {
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  await audioContext.resume(); // 🔥重要
+  await audioContext.resume();
 
   input = audioContext.createMediaStreamSource(stream);
-
   processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-  audioData = []; // 🔥毎回リセット
+  audioData = [];
 
-  processor.onaudioprocess = (e) => {
+  processor.onaudioprocess = e => {
     if (!isRecording) return;
-
-    const data = e.inputBuffer.getChannelData(0);
-    audioData.push(new Float32Array(data));
+    audioData.push(new Float32Array(e.inputBuffer.getChannelData(0)));
   };
 
   input.connect(processor);
-  processor.connect(audioContext.destination); // 🔥重要
+  processor.connect(audioContext.destination);
 
   isRecording = true;
   startTime = Date.now();
-
-  console.log("🎤 録音開始");
 }
 
-// ===== 録音停止 =====
 async function stopRecording() {
   if (!isRecording) return;
 
   isRecording = false;
 
   const duration = Date.now() - startTime;
-  console.log("録音時間:", duration);
-
-  if (duration < 1500) {
-    console.log("❌ 短すぎるので無視");
-    return;
-  }
+  if (duration < 1500) return;
 
   processor.disconnect();
   input.disconnect();
   stream.getTracks().forEach(t => t.stop());
 
-  console.log("chunks:", audioData.length);
-
-  if (audioData.length === 0) {
-    console.log("❌ データなし");
-    return;
-  }
-
   const blob = encodeWAV(audioData, audioContext.sampleRate);
 
-  console.log("blob size:", blob.size);
+  if (blob.size > 1000000) return; // デカすぎ防止
 
   await sendToServer(blob);
 }
 
-// ===== WAV変換 =====
 function encodeWAV(samples, sampleRate) {
-  let length = samples.reduce((acc, cur) => acc + cur.length, 0);
+  let length = samples.reduce((a, b) => a + b.length, 0);
   let buffer = new ArrayBuffer(44 + length * 2);
   let view = new DataView(buffer);
 
-  writeString(view, 0, "RIFF");
-  view.setUint32(4, 36 + length * 2, true);
-  writeString(view, 8, "WAVE");
-  writeString(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, "data");
-  view.setUint32(40, length * 2, true);
+  const write = (o, s) => s.split("").forEach((c,i)=>view.setUint8(o+i,c.charCodeAt(0)));
 
-  let offset = 44;
-  for (let i = 0; i < samples.length; i++) {
-    let s = samples[i];
-    for (let j = 0; j < s.length; j++) {
-      let val = Math.max(-1, Math.min(1, s[j]));
-      view.setInt16(offset, val < 0 ? val * 0x8000 : val * 0x7FFF, true);
-      offset += 2;
-    }
-  }
+  write(0,"RIFF");
+  view.setUint32(4,36+length*2,true);
+  write(8,"WAVE");
+  write(12,"fmt ");
+  view.setUint32(16,16,true);
+  view.setUint16(20,1,true);
+  view.setUint16(22,1,true);
+  view.setUint32(24,sampleRate,true);
+  view.setUint32(28,sampleRate*2,true);
+  view.setUint16(32,2,true);
+  view.setUint16(34,16,true);
+  write(36,"data");
+  view.setUint32(40,length*2,true);
 
-  return new Blob([view], { type: "audio/wav" });
-}
-
-function writeString(view, offset, str) {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i));
-  }
-}
-
-// ===== サーバー送信 =====
-async function sendToServer(blob) {
-  const formData = new FormData();
-  formData.append("audio", blob, "voice.wav");
-
-  const res = await fetch("/upload", {
-    method: "POST",
-    body: formData
+  let offset=44;
+  samples.forEach(s=>{
+    s.forEach(v=>{
+      view.setInt16(offset,Math.max(-1,Math.min(1,v))*32767,true);
+      offset+=2;
+    });
   });
 
-  if (!res.ok) {
-    console.error("❌ server error");
-    return;
-  }
-
-  const audioBlob = await res.blob();
-
-  if (audioBlob.size === 0) {
-    console.error("❌ empty audio");
-    return;
-  }
-
-  const url = URL.createObjectURL(audioBlob);
-  const audio = new Audio(url);
-
-  try {
-    await audio.play();
-  } catch (e) {
-    console.error("再生エラー", e);
-  }
+  return new Blob([view],{type:"audio/wav"});
 }
 
-// ===== ボタン =====
-document.getElementById("start").onclick = async () => {
-  await startRecording();
-};
+async function sendToServer(blob) {
+  const fd = new FormData();
+  fd.append("audio", blob, "voice.wav");
 
-document.getElementById("stop").onclick = () => {
-  stopRecording();
-};
+  const res = await fetch("/upload",{method:"POST",body:fd});
+
+  if (!res.ok) return console.error("server error");
+
+  const audio = new Audio(URL.createObjectURL(await res.blob()));
+  audio.play();
+}
+
+start.onclick = startRecording;
+stop.onclick = stopRecording;
 </script>
 
 </body>

@@ -5,19 +5,28 @@ import fetch from "node-fetch";
 import FormData from "form-data";
 
 const app = express();
-const upload = multer({ dest: "uploads/" });
+
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 app.use(express.static("public"));
 
+app.get("/", (req, res) => {
+  res.send("OK");
+});
+
+// ===== 音声処理 =====
 app.post("/upload", upload.single("audio"), async (req, res) => {
   const filePath = req.file?.path;
 
-  console.log("=== START REQUEST ===");
+  console.log("=== REQUEST START ===");
 
   if (!filePath) {
-    console.error("❌ no file");
+    console.error("no file");
     return res.status(400).send("no file");
   }
 
@@ -31,6 +40,8 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
     }
 
     // ===== Whisper =====
+    console.log("→ Whisper start");
+
     const formData = new FormData();
     formData.append("file", fs.createReadStream(filePath), {
       filename: "audio.wav",
@@ -51,7 +62,7 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
 
     if (!whisperRes.ok) {
       fs.unlinkSync(filePath);
-      return res.status(500).send("whisper http error");
+      return res.status(500).send("whisper error");
     }
 
     const whisperData = JSON.parse(whisperText);
@@ -59,12 +70,14 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
 
     if (!userText) {
       fs.unlinkSync(filePath);
-      return res.status(500).send("no transcription");
+      return res.status(500).send("no text");
     }
 
     console.log("USER:", userText);
 
     // ===== GPT =====
+    console.log("→ GPT start");
+
     const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -74,7 +87,7 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: "優しく短く話すぬいぐるみAI" },
+          { role: "system", content: "優しく寄り添うぬいぐるみAI" },
           { role: "user", content: userText }
         ]
       })
@@ -85,7 +98,7 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
 
     if (!chatRes.ok) {
       fs.unlinkSync(filePath);
-      return res.status(500).send("chat http error");
+      return res.status(500).send("chat error");
     }
 
     const chatData = JSON.parse(chatText);
@@ -93,12 +106,14 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
 
     if (!reply) {
       fs.unlinkSync(filePath);
-      return res.status(500).send("empty reply");
+      return res.status(500).send("no reply");
     }
 
     console.log("AI:", reply);
 
     // ===== TTS =====
+    console.log("→ TTS start");
+
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -127,7 +142,7 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
     res.send(Buffer.from(audioBuffer));
 
   } catch (err) {
-    console.error("🔥 SERVER ERROR:", err);
+    console.error("SERVER ERROR:", err);
 
     if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
@@ -137,6 +152,9 @@ app.post("/upload", upload.single("audio"), async (req, res) => {
   }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("server started");
+// 🔥 Render対応（超重要）
+const PORT = process.env.PORT;
+
+app.listen(PORT, () => {
+  console.log("🔥 server started on", PORT);
 });
