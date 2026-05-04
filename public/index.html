@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI（VAD完成版）</title>
+<title>よりそいAI（VAD安定版）</title>
 </head>
 <body>
 
@@ -23,12 +23,13 @@ let isRunning = false;
 let isPlaying = false;
 
 let silenceStart = null;
+let speakStart = null;
 let recordStartTime = 0;
 let hasSpoken = false;
 
-// ===== 調整パラメータ =====
-const THRESHOLD = 0.01;   // 無音判定
-const SPEAK_MIN = 0.03;   // 発話判定
+// ===== 調整パラメータ（ここ重要）=====
+const THRESHOLD = 0.02;     // 無音
+const SPEAK_MIN = 0.08;     // 発話（強めにした）
 const SILENCE_TIME = 800;
 const MIN_RECORD_TIME = 800;
 
@@ -70,6 +71,7 @@ function startRecording() {
   audioChunks = [];
   hasSpoken = false;
   silenceStart = null;
+  speakStart = null;
   recordStartTime = Date.now();
 
   mediaRecorder = new MediaRecorder(stream);
@@ -104,7 +106,7 @@ function startRecording() {
   detect();
 }
 
-// ===== VAD検出 =====
+// ===== VAD =====
 function detect() {
   if (!isRunning || isPlaying) return;
 
@@ -118,12 +120,18 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
-  // 発話検出
+  // 🔥 発話判定（連続200ms必要）
   if (volume > SPEAK_MIN) {
-    hasSpoken = true;
+    if (!speakStart) speakStart = Date.now();
+
+    if (Date.now() - speakStart > 200) {
+      hasSpoken = true;
+    }
+  } else {
+    speakStart = null;
   }
 
-  // 無音検出
+  // 🔇 無音判定
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
@@ -182,7 +190,7 @@ async function sendToServer(blob) {
   try {
     await audio.play();
   } catch (e) {
-    console.error("再生失敗", e);
+    console.error("❌ 再生失敗", e);
     isPlaying = false;
     restart();
   }
