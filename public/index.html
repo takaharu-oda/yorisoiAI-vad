@@ -2,108 +2,178 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI</title>
+<title>よりそいAI（VAD）</title>
 </head>
 <body>
 
-<h1>よりそいAI</h1>
+<h1>よりそいAI（VAD）</h1>
 <button id="start">会話スタート</button>
 <button id="stop">会話ストップ</button>
 
 <script>
-let audioContext, processor, input, stream;
-let audioData = [];
-let isRecording = false;
-let startTime = 0;
+let mediaRecorder;
+let audioChunks = [];
+let audioContext;
+let analyser;
+let dataArray;
+let stream;
+let audioPlayer;
 
-async function startRecording() {
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+let silenceStart = null;
+let isManualStop = false;
+let isRunning = false;
+let isPlaying = false;
+let recordStartTime = 0;
 
-  audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  await audioContext.resume();
+const params = new URLSearchParams(window.location.search);
+const userName = params.get("name");
 
-  input = audioContext.createMediaStreamSource(stream);
-  processor = audioContext.createScriptProcessor(4096, 1, 1);
+// 調整値
+const THRESHOLD = 0.01;
+const SILENCE_TIME = 1200;
+const MIN_RECORD_TIME = 800;
 
-  audioData = [];
+// ===== START =====
+document.getElementById("start").onclick = async () => {
+  if (isRunning) return;
 
-  processor.onaudioprocess = e => {
-    if (!isRecording) return;
-    audioData.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  console.log("🚀 開始");
+  isRunning = true;
+  isManualStop = false;
+
+  try {
+    audioContext = new AudioContext();
+    await audioContext.resume();
+
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("マイク取得OK");
+
+  } catch (e) {
+    console.error("マイクエラー:", e);
+    alert("マイク許可して！");
+    isRunning = false;
+    return;
+  }
+
+  audioPlayer = new Audio();
+
+  const source = audioContext.createMediaStreamSource(stream);
+  analyser = audioContext.createAnalyser();
+  source.connect(analyser);
+
+  dataArray = new Uint8Array(analyser.fftSize);
+
+  startRecording();
+};
+
+// ===== STOP =====
+document.getElementById("stop").onclick = () => {
+  console.log("⛔ 停止");
+
+  isManualStop = true;
+  isRunning = false;
+
+  mediaRecorder?.stop();
+  stream?.getTracks().forEach(t => t.stop());
+};
+
+// ===== 録音 =====
+function startRecording() {
+  if (!isRunning) return;
+
+  console.log("🎤 録音開始");
+
+  audioChunks = [];
+  recordStartTime = Date.now();
+
+  mediaRecorder = new MediaRecorder(stream);
+
+  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+  mediaRecorder.onstop = async () => {
+
+    if (isManualStop) return;
+
+    const duration = Date.now() - recordStartTime;
+    if (duration < MIN_RECORD_TIME) {
+      restart();
+      return;
+    }
+
+    console.log("📤 送信");
+
+    const blob = new Blob(audioChunks, { type: "audio/webm" });
+
+    const formData = new FormData();
+    formData.append("audio", blob);
+    formData.append("name", userName || "");
+
+    const res = await fetch("/api/voice", {
+      method: "POST",
+      body: formData
+    });
+
+    const url = URL.createObjectURL(await res.blob());
+
+    // 🔥 再生中は録音止める
+    isPlaying = true;
+
+    audioPlayer.src = url;
+    await audioPlayer.play().catch(e => console.log("再生エラー", e));
+
+    audioPlayer.onended = () => {
+      isPlaying = false;
+
+      setTimeout(() => {
+        restart();
+      }, 300);
+    };
   };
 
-  input.connect(processor);
-  processor.connect(audioContext.destination);
-
-  isRecording = true;
-  startTime = Date.now();
+  mediaRecorder.start();
+  detect();
 }
 
-async function stopRecording() {
-  if (!isRecording) return;
+// ===== 再スタート =====
+function restart() {
+  if (!isRunning) return;
+  if (isPlaying) return;
 
-  isRecording = false;
-
-  const duration = Date.now() - startTime;
-  if (duration < 1500) return;
-
-  processor.disconnect();
-  input.disconnect();
-  stream.getTracks().forEach(t => t.stop());
-
-  const blob = encodeWAV(audioData, audioContext.sampleRate);
-
-  if (blob.size > 1000000) return; // デカすぎ防止
-
-  await sendToServer(blob);
+  silenceStart = null;
+  startRecording();
 }
 
-function encodeWAV(samples, sampleRate) {
-  let length = samples.reduce((a, b) => a + b.length, 0);
-  let buffer = new ArrayBuffer(44 + length * 2);
-  let view = new DataView(buffer);
+// ===== VAD =====
+function detect() {
+  if (!isRunning || isPlaying) return;
 
-  const write = (o, s) => s.split("").forEach((c,i)=>view.setUint8(o+i,c.charCodeAt(0)));
+  analyser.getByteTimeDomainData(dataArray);
 
-  write(0,"RIFF");
-  view.setUint32(4,36+length*2,true);
-  write(8,"WAVE");
-  write(12,"fmt ");
-  view.setUint32(16,16,true);
-  view.setUint16(20,1,true);
-  view.setUint16(22,1,true);
-  view.setUint32(24,sampleRate,true);
-  view.setUint32(28,sampleRate*2,true);
-  view.setUint16(32,2,true);
-  view.setUint16(34,16,true);
-  write(36,"data");
-  view.setUint32(40,length*2,true);
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) {
+    let val = (dataArray[i] - 128) / 128;
+    sum += val * val;
+  }
 
-  let offset=44;
-  samples.forEach(s=>{
-    s.forEach(v=>{
-      view.setInt16(offset,Math.max(-1,Math.min(1,v))*32767,true);
-      offset+=2;
-    });
-  });
+  const volume = Math.sqrt(sum / dataArray.length);
 
-  return new Blob([view],{type:"audio/wav"});
+  if (volume < THRESHOLD) {
+    if (!silenceStart) silenceStart = Date.now();
+
+    if (
+      Date.now() - silenceStart > SILENCE_TIME &&
+      Date.now() - recordStartTime > MIN_RECORD_TIME
+    ) {
+      console.log("🔇 無音 → 送信");
+      mediaRecorder.stop();
+      return;
+    }
+  } else {
+    silenceStart = null;
+  }
+
+  requestAnimationFrame(detect);
 }
-
-async function sendToServer(blob) {
-  const fd = new FormData();
-  fd.append("audio", blob, "voice.wav");
-
-  const res = await fetch("/upload",{method:"POST",body:fd});
-
-  if (!res.ok) return console.error("server error");
-
-  const audio = new Audio(URL.createObjectURL(await res.blob()));
-  audio.play();
-}
-
-start.onclick = startRecording;
-stop.onclick = stopRecording;
 </script>
 
 </body>
