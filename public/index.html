@@ -7,20 +7,37 @@
 </head>
 <body>
 
-<h2>よりそいAI（テスト）</h2>
+<h2>よりそいAI（スマホ対応）</h2>
 <button id="record">🎤 録音（3秒）</button>
 
 <script>
 let audioContext;
+let unlockedAudio = null;
 
-// ===== 録音ボタン =====
 document.getElementById("record").onclick = async () => {
 
-  // 🔥 これが一番重要（スマホ音声解除）
+  // 🔥 再生権限解除（最重要）
+  unlockedAudio = new Audio();
+  unlockedAudio.muted = true;
+
+  try {
+    await unlockedAudio.play();
+    console.log("🔓 unlocked");
+  } catch (e) {
+    console.log("unlock失敗", e);
+  }
+
+  // 🔥 iPhone用
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
   await audioContext.resume();
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
 
   const mediaRecorder = new MediaRecorder(stream);
   let chunks = [];
@@ -51,10 +68,23 @@ document.getElementById("record").onclick = async () => {
     const audioBlob = await res.blob();
     console.log("🔊 size:", audioBlob.size);
 
+    if (audioBlob.size === 0) {
+      console.error("❌ empty audio");
+      return;
+    }
+
     const url = URL.createObjectURL(audioBlob);
 
-    // 🔥 これが超重要（ボタン操作内で再生）
-    const audio = new Audio(url);
+    // 🔥 同じAudioを使う（超重要）
+    const audio = unlockedAudio || new Audio();
+
+    audio.src = url;
+    audio.muted = false;
+    audio.currentTime = 0;
+    audio.volume = 1;
+
+    audio.setAttribute("playsinline", "true");
+    audio.setAttribute("webkit-playsinline", "true");
 
     try {
       await audio.play();
