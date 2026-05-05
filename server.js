@@ -8,9 +8,14 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+// ===== API =====
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    const name = req.body.name;
+    if (!req.file) {
+      return res.status(400).send("no file");
+    }
+
+    console.log("📥 file size:", req.file.size);
 
     // ===== STT =====
     const form = new FormData();
@@ -22,19 +27,23 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 
     const sttRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
       body: form
     });
 
     const sttData = await sttRes.json();
-    const text = sttData.text || "";
-    console.log("認識:", text);
+
+    if (!sttData.text) {
+      console.log("❌ transcription failed", sttData);
+      return res.status(500).send("stt error");
+    }
+
+    const text = sttData.text;
+    console.log("📝 認識:", text);
 
     // ===== GPT =====
-    const systemPrompt = name
-      ? `あなたはやさしいぬいぐるみ。時々「${name}」と呼びかけて短く1文で答える。`
-      : `あなたはやさしいぬいぐるみ。短く1文で答える。`;
-
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -43,18 +52,30 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        temperature: 0.3,
-        max_tokens: 50,
+        temperature: 0.4,
+        max_tokens: 60,
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: text }
+          {
+            role: "system",
+            content: "あなたはやさしいぬいぐるみ。短く1文で答える。"
+          },
+          {
+            role: "user",
+            content: text
+          }
         ]
       })
     });
 
     const gptData = await gptRes.json();
+
+    if (!gptData.choices) {
+      console.log("❌ GPT error", gptData);
+      return res.status(500).send("gpt error");
+    }
+
     const reply = gptData.choices[0].message.content;
-    console.log("返答:", reply);
+    console.log("💬 返答:", reply);
 
     // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
@@ -71,17 +92,29 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       })
     });
 
+    if (!ttsRes.ok) {
+      const err = await ttsRes.text();
+      console.log("❌ TTS error:", err);
+      return res.status(500).send("tts error");
+    }
+
+    // 🔥 超重要（スマホ音出すため）
     res.set("Content-Type", "audio/mpeg");
+
+    // ストリーム返す
     ttsRes.body.pipe(res);
 
   } catch (e) {
-    console.error(e);
-    res.status(500).send("error");
+    console.error("❌ server crash", e);
+    res.status(500).send("server error");
   }
 });
 
+// ===== 静的ファイル =====
 app.use(express.static("public"));
 
-app.listen(process.env.PORT || 3001, () => {
-  console.log("server running");
+// ===== 起動 =====
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("🚀 server running on port", PORT);
 });
