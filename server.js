@@ -16,6 +16,8 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const namesRaw = req.body.names || "";
     const names = namesRaw.split(",").map(n => n.trim()).filter(Boolean);
 
+    console.log("📛 names:", names);
+
     // ===== STT =====
     const form = new FormData();
     form.append("file", req.file.buffer, {
