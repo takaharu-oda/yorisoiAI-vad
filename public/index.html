@@ -1,42 +1,7 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>よりそいAI</title>
-</head>
-<body>
-
-<h2>よりそいAI</h2>
-
-<!-- 名前設定 -->
-<input id="names" placeholder="たろう,はなこ">
-<button id="save">保存</button>
-
-<br><br>
-
-<button id="start">▶ 会話スタート</button>
-<button id="stop">■ 停止</button>
-
 <script>
 let audioContext;
 let isRunning = false;
 let currentStream = null;
-
-// ===== 名前保存 =====
-document.getElementById("save").onclick = () => {
-  const names = document.getElementById("names").value;
-  localStorage.setItem("familyNames", names);
-  alert("保存したよ！");
-};
-
-// ===== 起動時に復元 =====
-window.onload = () => {
-  const saved = localStorage.getItem("familyNames");
-  if (saved) {
-    document.getElementById("names").value = saved;
-  }
-};
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
@@ -47,94 +12,113 @@ document.getElementById("start").onclick = async () => {
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
   await audioContext.resume();
 
-  console.log("🚀 会話スタート");
-
-  startLoop();
+  startVAD();
 };
 
 // ===== STOP =====
 document.getElementById("stop").onclick = () => {
   isRunning = false;
-
-  if (currentStream) {
-    currentStream.getTracks().forEach(t => t.stop());
-  }
+  currentStream?.getTracks().forEach(t => t.stop());
 };
 
-// ===== ループ =====
-async function startLoop() {
+// ===== VAD =====
+async function startVAD() {
   if (!isRunning) return;
 
-  try {
-    currentStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
+  currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  const source = audioContext.createMediaStreamSource(currentStream);
+  const analyser = audioContext.createAnalyser();
+
+  analyser.fftSize = 2048;
+  source.connect(analyser);
+
+  const data = new Uint8Array(analyser.fftSize);
+
+  let mediaRecorder = new MediaRecorder(currentStream);
+  let chunks = [];
+
+  let silenceStart = null;
+  let hasSpoken = false;
+
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+    if (!isRunning) return;
+
+    const blob = new Blob(chunks, { type: "audio/webm" });
+
+    const fd = new FormData();
+    fd.append("audio", blob);
+
+    const names = document.getElementById("names").value;
+    if (names) fd.append("names", names);
+
+    const res = await fetch("/api/voice", {
+      method: "POST",
+      body: fd
     });
 
-    const mediaRecorder = new MediaRecorder(currentStream);
-    let chunks = [];
+    if (!res.ok || res.status === 204) {
+      return startVAD();
+    }
 
-    mediaRecorder.ondataavailable = e => {
-      if (e.data.size > 0) chunks.push(e.data);
+    const audioBlob = await res.blob();
+
+    if (!audioBlob || audioBlob.size < 1000) {
+      return startVAD();
+    }
+
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const sourceNode = audioContext.createBufferSource();
+    sourceNode.buffer = audioBuffer;
+    sourceNode.connect(audioContext.destination);
+    sourceNode.start();
+
+    sourceNode.onended = () => {
+      startVAD();
     };
+  };
 
-    mediaRecorder.onstop = async () => {
-      if (!isRunning) return;
+  mediaRecorder.start();
 
-      const blob = new Blob(chunks, { type: "audio/webm" });
+  detect();
 
-      const fd = new FormData();
-      fd.append("audio", blob);
+  function detect() {
+    if (!isRunning) return;
 
-      // 🔥 名前送信
-      const names = document.getElementById("names").value;
-      if (names) fd.append("names", names);
+    analyser.getByteTimeDomainData(data);
 
-      const res = await fetch("/api/voice", {
-        method: "POST",
-        body: fd
-      });
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      let val = (data[i] - 128) / 128;
+      sum += val * val;
+    }
 
-      if (res.status === 204) {
-        return startLoop();
+    const volume = Math.sqrt(sum / data.length);
+
+    // 発話検知
+    if (volume > 0.03) {
+      hasSpoken = true;
+      silenceStart = null;
+    } else {
+      if (!silenceStart) silenceStart = Date.now();
+
+      if (
+        hasSpoken &&
+        Date.now() - silenceStart > 800
+      ) {
+        mediaRecorder.stop();
+        currentStream.getTracks().forEach(t => t.stop());
+        return;
       }
+    }
 
-      const audioBlob = await res.blob();
-
-      if (audioBlob.size < 1000) {
-        return startLoop();
-      }
-
-      // 🔥 スマホ対応再生
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-      const source = audioContext.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContext.destination);
-
-      source.start();
-
-      source.onended = () => {
-        startLoop();
-      };
-    };
-
-    mediaRecorder.start();
-
-    setTimeout(() => {
-      mediaRecorder.stop();
-      currentStream.getTracks().forEach(t => t.stop());
-    }, 3000);
-
-  } catch (e) {
-    console.error(e);
+    requestAnimationFrame(detect);
   }
 }
 </script>
-
-</body>
-</html>
