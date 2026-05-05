@@ -2,16 +2,16 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI（スマホ最適版）</title>
+<title>よりそいAI（スマホ音声対応）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
 
 <h2>よりそいAI</h2>
-<input id="name" placeholder="名前（たろう）" style="font-size:18px;">
+<input id="name" placeholder="名前（たろう）">
 <br><br>
-<button id="start" style="font-size:20px;">▶ 会話スタート</button>
-<button id="stop" style="font-size:20px;">■ 停止</button>
+<button id="start">▶ 会話スタート</button>
+<button id="stop">■ 停止</button>
 
 <script>
 let audioContext, analyser, dataArray, stream;
@@ -19,13 +19,14 @@ let mediaRecorder, audioChunks = [];
 
 let isRunning = false;
 let isPlaying = false;
+let unlocked = false; // 🔥 これ重要
 
 let silenceStart = null;
 let speakStart = null;
 let hasSpoken = false;
 let recordStartTime = 0;
 
-// ===== スマホ用調整 =====
+// ===== 調整 =====
 const SPEAK_MIN = 0.03;
 const THRESHOLD = 0.01;
 const SILENCE_TIME = 1000;
@@ -37,7 +38,14 @@ start.onclick = async () => {
 
   isRunning = true;
 
-  // 🔥 スマホ最重要
+  // 🔥 autoplay解除（最重要）
+  if (!unlocked) {
+    const tmp = new Audio();
+    tmp.play().catch(() => {});
+    unlocked = true;
+    console.log("🔓 audio unlock");
+  }
+
   stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: true,
@@ -112,18 +120,13 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
-  // 発話
   if (volume > SPEAK_MIN) {
     if (!speakStart) speakStart = Date.now();
-
-    if (Date.now() - speakStart > 100) {
-      hasSpoken = true;
-    }
+    if (Date.now() - speakStart > 100) hasSpoken = true;
   } else {
     speakStart = null;
   }
 
-  // 無音
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
@@ -158,6 +161,9 @@ async function sendToServer(blob) {
   if (!res.ok) return restart();
 
   const audioBlob = await res.blob();
+
+  console.log("🔊 size:", audioBlob.size);
+
   if (audioBlob.size === 0) return restart();
 
   const url = URL.createObjectURL(audioBlob);
@@ -172,7 +178,9 @@ async function sendToServer(blob) {
 
   try {
     await audio.play();
+    console.log("▶ 再生成功");
   } catch (e) {
+    console.error("❌ 再生失敗", e);
     isPlaying = false;
     restart();
   }
