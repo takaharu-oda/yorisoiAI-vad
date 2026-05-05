@@ -3,24 +3,40 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>よりそいAI ループ版</title>
+<title>よりそいAI</title>
 </head>
 <body>
 
 <h2>よりそいAI</h2>
 
+<!-- 名前設定 -->
+<input id="names" placeholder="たろう,はなこ">
+<button id="save">保存</button>
+
+<br><br>
+
 <button id="start">▶ 会話スタート</button>
 <button id="stop">■ 停止</button>
-
-<!-- デバッグ用 -->
-<button onclick='new Audio("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3").play()'>
-音テスト
-</button>
 
 <script>
 let audioContext;
 let isRunning = false;
 let currentStream = null;
+
+// ===== 名前保存 =====
+document.getElementById("save").onclick = () => {
+  const names = document.getElementById("names").value;
+  localStorage.setItem("familyNames", names);
+  alert("保存したよ！");
+};
+
+// ===== 起動時に復元 =====
+window.onload = () => {
+  const saved = localStorage.getItem("familyNames");
+  if (saved) {
+    document.getElementById("names").value = saved;
+  }
+};
 
 // ===== START =====
 document.getElementById("start").onclick = async () => {
@@ -28,7 +44,6 @@ document.getElementById("start").onclick = async () => {
 
   isRunning = true;
 
-  // 🔥 音声解禁
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
   await audioContext.resume();
 
@@ -39,8 +54,6 @@ document.getElementById("start").onclick = async () => {
 
 // ===== STOP =====
 document.getElementById("stop").onclick = () => {
-  console.log("🛑 停止");
-
   isRunning = false;
 
   if (currentStream) {
@@ -76,28 +89,26 @@ async function startLoop() {
       const fd = new FormData();
       fd.append("audio", blob);
 
-      console.log("📤 送信");
+      // 🔥 名前送信
+      const names = document.getElementById("names").value;
+      if (names) fd.append("names", names);
 
       const res = await fetch("/api/voice", {
         method: "POST",
         body: fd
       });
 
-      // 🔇 無音
       if (res.status === 204) {
-        console.log("🔇 無音スキップ");
         return startLoop();
       }
 
       const audioBlob = await res.blob();
 
-      console.log("🔊 size:", audioBlob.size);
-
-      if (audioBlob.size === 0) {
+      if (audioBlob.size < 1000) {
         return startLoop();
       }
 
-      // 🔥 AudioContext再生（スマホ対応）
+      // 🔥 スマホ対応再生
       const arrayBuffer = await audioBlob.arrayBuffer();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
@@ -107,25 +118,20 @@ async function startLoop() {
 
       source.start();
 
-      // 🔁 再生終わったら次
       source.onended = () => {
-        console.log("🔁 次の会話");
         startLoop();
       };
     };
 
     mediaRecorder.start();
 
-    console.log("🎤 録音開始");
-
     setTimeout(() => {
       mediaRecorder.stop();
       currentStream.getTracks().forEach(t => t.stop());
-      console.log("🛑 録音停止");
     }, 3000);
 
   } catch (e) {
-    console.error("❌ エラー:", e);
+    console.error(e);
   }
 }
 </script>

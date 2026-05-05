@@ -8,15 +8,13 @@ const upload = multer();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ===== API =====
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
-    if (!req.file) {
-      console.log("❌ no file");
-      return res.status(400).send("no file");
-    }
+    if (!req.file) return res.status(400).send("no file");
 
-    console.log("📥 file size:", req.file.size);
+    // ===== 名前取得 =====
+    const namesRaw = req.body.names || "";
+    const names = namesRaw.split(",").map(n => n.trim()).filter(Boolean);
 
     // ===== STT =====
     const form = new FormData();
@@ -35,14 +33,27 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     });
 
     const sttData = await sttRes.json();
+    const text = sttData.text || "";
 
-    if (!sttData.text) {
-      console.log("❌ STT error:", sttData);
-      return res.status(500).send("stt error");
+    // 🔇 無音スキップ
+    if (!text.trim()) {
+      return res.status(204).end();
     }
 
-    const text = sttData.text;
-    console.log("📝 認識:", text);
+    // ===== 呼び方ロジック =====
+    let callName = "";
+
+    if (names.length >= 2) {
+      if (Math.random() < 0.3) callName = "みんなー";
+    } else if (names.length === 1) {
+      if (Math.random() < 0.3) callName = names[0];
+    }
+
+    let systemPrompt = "あなたはやさしいぬいぐるみ。短く1文で話す。";
+
+    if (callName) {
+      systemPrompt += ` 時々「${callName}」と呼びかける。`;
+    }
 
     // ===== GPT =====
     const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -53,30 +64,15 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        temperature: 0.4,
-        max_tokens: 60,
         messages: [
-          {
-            role: "system",
-            content: "あなたはやさしいぬいぐるみ。短く1文で答える。"
-          },
-          {
-            role: "user",
-            content: text
-          }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text }
         ]
       })
     });
 
     const gptData = await gptRes.json();
-
-    if (!gptData.choices) {
-      console.log("❌ GPT error:", gptData);
-      return res.status(500).send("gpt error");
-    }
-
     const reply = gptData.choices[0].message.content;
-    console.log("💬 返答:", reply);
 
     // ===== TTS =====
     const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
@@ -94,32 +90,22 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     });
 
     if (!ttsRes.ok) {
-      const err = await ttsRes.text();
-      console.log("❌ TTS error:", err);
-      return res.status(500).send("tts error");
+      return res.status(204).end();
     }
 
-    // 🔥 ここ超重要（スマホ対応）
-    res.set("Content-Type", "audio/mpeg");
-
-    // 🔥 安定版（pipeじゃなくbuffer）
     const audioBuffer = await ttsRes.buffer();
 
-    console.log("🔊 audio size:", audioBuffer.length);
-
+    res.set("Content-Type", "audio/mpeg");
     res.send(audioBuffer);
 
   } catch (e) {
-    console.error("❌ server crash:", e);
-    res.status(500).send("server error");
+    console.error(e);
+    res.status(204).end();
   }
 });
 
-// ===== 静的 =====
 app.use(express.static("public"));
 
-// ===== 起動 =====
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("🚀 server running on", PORT);
+app.listen(process.env.PORT || 3000, () => {
+  console.log("server running");
 });
