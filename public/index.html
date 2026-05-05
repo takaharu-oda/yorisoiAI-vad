@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI（スマホ音声対応）</title>
+<title>よりそいAI 完成版</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
@@ -16,10 +16,10 @@
 <script>
 let audioContext, analyser, dataArray, stream;
 let mediaRecorder, audioChunks = [];
+let currentAudio = null;
 
 let isRunning = false;
 let isPlaying = false;
-let unlocked = false; // 🔥 これ重要
 
 let silenceStart = null;
 let speakStart = null;
@@ -32,19 +32,27 @@ const THRESHOLD = 0.01;
 const SILENCE_TIME = 1000;
 const MIN_RECORD_TIME = 1200;
 
+// ===== 🔓 音声アンロック（最重要）=====
+async function unlockAudio() {
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  await audioContext.resume();
+
+  const buffer = audioContext.createBuffer(1, 1, 22050);
+  const source = audioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioContext.destination);
+  source.start(0);
+
+  console.log("🔓 audio unlocked");
+}
+
 // ===== START =====
 start.onclick = async () => {
   if (isRunning) return;
 
   isRunning = true;
 
-  // 🔥 autoplay解除（最重要）
-  if (!unlocked) {
-    const tmp = new Audio();
-    tmp.play().catch(() => {});
-    unlocked = true;
-    console.log("🔓 audio unlock");
-  }
+  await unlockAudio();
 
   stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -53,9 +61,6 @@ start.onclick = async () => {
       autoGainControl: true
     }
   });
-
-  audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  await audioContext.resume(); // iPhone対策
 
   const source = audioContext.createMediaStreamSource(stream);
 
@@ -70,9 +75,24 @@ start.onclick = async () => {
 
 // ===== STOP =====
 stop.onclick = () => {
+  console.log("🛑 STOP");
+
   isRunning = false;
+  isPlaying = false;
+
+  // 🎤 録音停止
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+
+  // 🔊 再生停止
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+  }
+
+  // 🎧 マイク停止
   stream?.getTracks().forEach(t => t.stop());
-  mediaRecorder?.stop();
 };
 
 // ===== 録音 =====
@@ -92,6 +112,8 @@ function startRecording() {
   };
 
   mediaRecorder.onstop = async () => {
+    if (!isRunning) return;
+
     const duration = Date.now() - recordStartTime;
 
     if (!hasSpoken) return restart();
@@ -120,6 +142,7 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
+  // 発話
   if (volume > SPEAK_MIN) {
     if (!speakStart) speakStart = Date.now();
     if (Date.now() - speakStart > 100) hasSpoken = true;
@@ -127,6 +150,7 @@ function detect() {
     speakStart = null;
   }
 
+  // 無音
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
@@ -145,8 +169,10 @@ function detect() {
   requestAnimationFrame(detect);
 }
 
-// ===== サーバー送信 =====
+// ===== サーバー =====
 async function sendToServer(blob) {
+  if (!isRunning) return;
+
   const fd = new FormData();
   fd.append("audio", blob);
 
@@ -161,24 +187,22 @@ async function sendToServer(blob) {
   if (!res.ok) return restart();
 
   const audioBlob = await res.blob();
-
-  console.log("🔊 size:", audioBlob.size);
-
   if (audioBlob.size === 0) return restart();
 
   const url = URL.createObjectURL(audioBlob);
   const audio = new Audio(url);
+  currentAudio = audio;
 
   isPlaying = true;
 
   audio.onended = () => {
     isPlaying = false;
-    restart();
+    if (isRunning) restart();
   };
 
   try {
     await audio.play();
-    console.log("▶ 再生成功");
+    console.log("▶ 再生OK");
   } catch (e) {
     console.error("❌ 再生失敗", e);
     isPlaying = false;
@@ -186,7 +210,7 @@ async function sendToServer(blob) {
   }
 }
 
-// ===== 再スタート =====
+// ===== ループ =====
 function restart() {
   if (!isRunning) return;
   startRecording();
