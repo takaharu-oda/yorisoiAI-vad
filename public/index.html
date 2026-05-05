@@ -2,48 +2,53 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI（VAD安定版）</title>
+<title>よりそいAI（スマホ最適版）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
 
-<h1>よりそいAI</h1>
-<button id="start">会話スタート</button>
-<button id="stop">停止</button>
+<h2>よりそいAI</h2>
+<input id="name" placeholder="名前（たろう）" style="font-size:18px;">
+<br><br>
+<button id="start" style="font-size:20px;">▶ 会話スタート</button>
+<button id="stop" style="font-size:20px;">■ 停止</button>
 
 <script>
-let audioContext;
-let analyser;
-let dataArray;
-let stream;
-
-let mediaRecorder;
-let audioChunks = [];
+let audioContext, analyser, dataArray, stream;
+let mediaRecorder, audioChunks = [];
 
 let isRunning = false;
 let isPlaying = false;
 
 let silenceStart = null;
 let speakStart = null;
-let recordStartTime = 0;
 let hasSpoken = false;
+let recordStartTime = 0;
 
-// ===== 調整パラメータ（ここ重要）=====
-const THRESHOLD = 0.015;     // 無音
-const SPEAK_MIN = 0.05;     // 発話（強めにした）
-const SILENCE_TIME = 800;
-const MIN_RECORD_TIME = 800;
+// ===== スマホ用調整 =====
+const SPEAK_MIN = 0.03;
+const THRESHOLD = 0.01;
+const SILENCE_TIME = 1000;
+const MIN_RECORD_TIME = 1200;
 
-// ===== スタート =====
-document.getElementById("start").onclick = async () => {
+// ===== START =====
+start.onclick = async () => {
   if (isRunning) return;
-
-  console.log("🚀 開始");
 
   isRunning = true;
 
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  // 🔥 スマホ最重要
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
 
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  await audioContext.resume(); // iPhone対策
+
   const source = audioContext.createMediaStreamSource(stream);
 
   analyser = audioContext.createAnalyser();
@@ -55,18 +60,16 @@ document.getElementById("start").onclick = async () => {
   startRecording();
 };
 
-// ===== 停止 =====
-document.getElementById("stop").onclick = () => {
+// ===== STOP =====
+stop.onclick = () => {
   isRunning = false;
   stream?.getTracks().forEach(t => t.stop());
   mediaRecorder?.stop();
 };
 
-// ===== 録音開始 =====
+// ===== 録音 =====
 function startRecording() {
   if (!isRunning || isPlaying) return;
-
-  console.log("🎤 録音開始");
 
   audioChunks = [];
   hasSpoken = false;
@@ -83,21 +86,10 @@ function startRecording() {
   mediaRecorder.onstop = async () => {
     const duration = Date.now() - recordStartTime;
 
-    if (!hasSpoken) {
-      console.log("❌ 無音スキップ");
-      restart();
-      return;
-    }
-
-    if (duration < MIN_RECORD_TIME) {
-      console.log("❌ 短すぎ");
-      restart();
-      return;
-    }
+    if (!hasSpoken) return restart();
+    if (duration < MIN_RECORD_TIME) return restart();
 
     const blob = new Blob(audioChunks, { type: "audio/webm" });
-
-    console.log("📦 size:", blob.size);
 
     await sendToServer(blob);
   };
@@ -120,18 +112,18 @@ function detect() {
 
   const volume = Math.sqrt(sum / dataArray.length);
 
-  // 🔥 発話判定（連続200ms必要）
+  // 発話
   if (volume > SPEAK_MIN) {
     if (!speakStart) speakStart = Date.now();
 
-    if (Date.now() - speakStart > 200) {
+    if (Date.now() - speakStart > 100) {
       hasSpoken = true;
     }
   } else {
     speakStart = null;
   }
 
-  // 🔇 無音判定
+  // 無音
   if (volume < THRESHOLD) {
     if (!silenceStart) silenceStart = Date.now();
 
@@ -140,7 +132,6 @@ function detect() {
       Date.now() - silenceStart > SILENCE_TIME &&
       Date.now() - recordStartTime > MIN_RECORD_TIME
     ) {
-      console.log("🔇 stop");
       mediaRecorder.stop();
       return;
     }
@@ -153,29 +144,21 @@ function detect() {
 
 // ===== サーバー送信 =====
 async function sendToServer(blob) {
-  console.log("📤 送信");
-
   const fd = new FormData();
   fd.append("audio", blob);
+
+  const name = document.getElementById("name").value;
+  if (name) fd.append("name", name);
 
   const res = await fetch("/api/voice", {
     method: "POST",
     body: fd
   });
 
-  if (!res.ok) {
-    console.error("❌ server error");
-    restart();
-    return;
-  }
+  if (!res.ok) return restart();
 
   const audioBlob = await res.blob();
-
-  if (audioBlob.size === 0) {
-    console.error("❌ empty audio");
-    restart();
-    return;
-  }
+  if (audioBlob.size === 0) return restart();
 
   const url = URL.createObjectURL(audioBlob);
   const audio = new Audio(url);
@@ -190,7 +173,6 @@ async function sendToServer(blob) {
   try {
     await audio.play();
   } catch (e) {
-    console.error("❌ 再生失敗", e);
     isPlaying = false;
     restart();
   }
