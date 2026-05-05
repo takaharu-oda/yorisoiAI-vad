@@ -12,6 +12,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
     if (!req.file) {
+      console.log("❌ no file");
       return res.status(400).send("no file");
     }
 
@@ -36,7 +37,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const sttData = await sttRes.json();
 
     if (!sttData.text) {
-      console.log("❌ transcription failed", sttData);
+      console.log("❌ STT error:", sttData);
       return res.status(500).send("stt error");
     }
 
@@ -70,7 +71,7 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     const gptData = await gptRes.json();
 
     if (!gptData.choices) {
-      console.log("❌ GPT error", gptData);
+      console.log("❌ GPT error:", gptData);
       return res.status(500).send("gpt error");
     }
 
@@ -98,23 +99,27 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       return res.status(500).send("tts error");
     }
 
-    // 🔥 超重要（スマホ音出すため）
+    // 🔥 ここ超重要（スマホ対応）
     res.set("Content-Type", "audio/mpeg");
 
-    // ストリーム返す
-    ttsRes.body.pipe(res);
+    // 🔥 安定版（pipeじゃなくbuffer）
+    const audioBuffer = await ttsRes.buffer();
+
+    console.log("🔊 audio size:", audioBuffer.length);
+
+    res.send(audioBuffer);
 
   } catch (e) {
-    console.error("❌ server crash", e);
+    console.error("❌ server crash:", e);
     res.status(500).send("server error");
   }
 });
 
-// ===== 静的ファイル =====
+// ===== 静的 =====
 app.use(express.static("public"));
 
 // ===== 起動 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🚀 server running on port", PORT);
+  console.log("🚀 server running on", PORT);
 });
