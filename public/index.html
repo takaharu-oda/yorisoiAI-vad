@@ -1,3 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>よりそいAI 完成版</title>
+</head>
+<body>
+
+<h2>よりそいAI</h2>
+
+<button id="record">🎤 録音（3秒）</button>
+
+<!-- 🔥 デバッグ用 -->
 <button onclick='new Audio("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3").play()'>
 音テスト
 </button>
+
+<script>
+let audioContext;
+
+// ===== 録音ボタン =====
+document.getElementById("record").onclick = async () => {
+
+  // 🔥 AudioContext初期化（最重要）
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  await audioContext.resume();
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
+
+  const mediaRecorder = new MediaRecorder(stream);
+  let chunks = [];
+
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+
+    const blob = new Blob(chunks, { type: "audio/webm" });
+
+    const fd = new FormData();
+    fd.append("audio", blob);
+
+    console.log("📤 送信");
+
+    const res = await fetch("/api/voice", {
+      method: "POST",
+      body: fd
+    });
+
+    if (!res.ok) {
+      console.error("❌ server error");
+      return;
+    }
+
+    const audioBlob = await res.blob();
+
+    console.log("🔊 size:", audioBlob.size);
+
+    if (audioBlob.size === 0) {
+      console.error("❌ empty audio");
+      return;
+    }
+
+    // 🔥 ここが核心（AudioContext再生）
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
+
+    source.start();
+
+    console.log("▶ 再生成功");
+  };
+
+  mediaRecorder.start();
+
+  console.log("🎤 録音開始");
+
+  setTimeout(() => {
+    mediaRecorder.stop();
+    stream.getTracks().forEach(t => t.stop());
+    console.log("🛑 録音停止");
+  }, 3000);
+};
+</script>
+
+</body>
+</html>
