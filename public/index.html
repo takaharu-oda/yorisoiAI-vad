@@ -2,219 +2,78 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>よりそいAI 完成版</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>よりそいAI シンプル版</title>
 </head>
 <body>
 
-<h2>よりそいAI</h2>
-<input id="name" placeholder="名前（たろう）">
-<br><br>
-<button id="start">▶ 会話スタート</button>
-<button id="stop">■ 停止</button>
+<h2>よりそいAI（テスト）</h2>
+<button id="record">🎤 録音（3秒）</button>
 
 <script>
-let audioContext, analyser, dataArray, stream;
-let mediaRecorder, audioChunks = [];
-let currentAudio = null;
+let audioContext;
 
-let isRunning = false;
-let isPlaying = false;
+// ===== 録音ボタン =====
+document.getElementById("record").onclick = async () => {
 
-let silenceStart = null;
-let speakStart = null;
-let hasSpoken = false;
-let recordStartTime = 0;
-
-// ===== 調整 =====
-const SPEAK_MIN = 0.03;
-const THRESHOLD = 0.01;
-const SILENCE_TIME = 1000;
-const MIN_RECORD_TIME = 1200;
-
-// ===== 🔓 音声アンロック（最重要）=====
-async function unlockAudio() {
+  // 🔥 これが一番重要（スマホ音声解除）
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
   await audioContext.resume();
 
-  const buffer = audioContext.createBuffer(1, 1, 22050);
-  const source = audioContext.createBufferSource();
-  source.buffer = buffer;
-  source.connect(audioContext.destination);
-  source.start(0);
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  console.log("🔓 audio unlocked");
-}
-
-// ===== START =====
-start.onclick = async () => {
-  if (isRunning) return;
-
-  isRunning = true;
-
-  await unlockAudio();
-
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    }
-  });
-
-  const source = audioContext.createMediaStreamSource(stream);
-
-  analyser = audioContext.createAnalyser();
-  analyser.fftSize = 2048;
-
-  source.connect(analyser);
-  dataArray = new Uint8Array(analyser.fftSize);
-
-  startRecording();
-};
-
-// ===== STOP =====
-stop.onclick = () => {
-  console.log("🛑 STOP");
-
-  isRunning = false;
-  isPlaying = false;
-
-  // 🎤 録音停止
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.stop();
-  }
-
-  // 🔊 再生停止
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.currentTime = 0;
-  }
-
-  // 🎧 マイク停止
-  stream?.getTracks().forEach(t => t.stop());
-};
-
-// ===== 録音 =====
-function startRecording() {
-  if (!isRunning || isPlaying) return;
-
-  audioChunks = [];
-  hasSpoken = false;
-  silenceStart = null;
-  speakStart = null;
-  recordStartTime = Date.now();
-
-  mediaRecorder = new MediaRecorder(stream);
+  const mediaRecorder = new MediaRecorder(stream);
+  let chunks = [];
 
   mediaRecorder.ondataavailable = e => {
-    if (e.data.size > 0) audioChunks.push(e.data);
+    if (e.data.size > 0) chunks.push(e.data);
   };
 
   mediaRecorder.onstop = async () => {
-    if (!isRunning) return;
 
-    const duration = Date.now() - recordStartTime;
+    const blob = new Blob(chunks, { type: "audio/webm" });
 
-    if (!hasSpoken) return restart();
-    if (duration < MIN_RECORD_TIME) return restart();
+    const fd = new FormData();
+    fd.append("audio", blob);
 
-    const blob = new Blob(audioChunks, { type: "audio/webm" });
+    console.log("📤 送信");
 
-    await sendToServer(blob);
-  };
+    const res = await fetch("/api/voice", {
+      method: "POST",
+      body: fd
+    });
 
-  mediaRecorder.start(100);
-  detect();
-}
-
-// ===== VAD =====
-function detect() {
-  if (!isRunning || isPlaying) return;
-
-  analyser.getByteTimeDomainData(dataArray);
-
-  let sum = 0;
-  for (let i = 0; i < dataArray.length; i++) {
-    let val = (dataArray[i] - 128) / 128;
-    sum += val * val;
-  }
-
-  const volume = Math.sqrt(sum / dataArray.length);
-
-  // 発話
-  if (volume > SPEAK_MIN) {
-    if (!speakStart) speakStart = Date.now();
-    if (Date.now() - speakStart > 100) hasSpoken = true;
-  } else {
-    speakStart = null;
-  }
-
-  // 無音
-  if (volume < THRESHOLD) {
-    if (!silenceStart) silenceStart = Date.now();
-
-    if (
-      hasSpoken &&
-      Date.now() - silenceStart > SILENCE_TIME &&
-      Date.now() - recordStartTime > MIN_RECORD_TIME
-    ) {
-      mediaRecorder.stop();
+    if (!res.ok) {
+      console.error("❌ server error");
       return;
     }
-  } else {
-    silenceStart = null;
-  }
 
-  requestAnimationFrame(detect);
-}
+    const audioBlob = await res.blob();
+    console.log("🔊 size:", audioBlob.size);
 
-// ===== サーバー =====
-async function sendToServer(blob) {
-  if (!isRunning) return;
+    const url = URL.createObjectURL(audioBlob);
 
-  const fd = new FormData();
-  fd.append("audio", blob);
+    // 🔥 これが超重要（ボタン操作内で再生）
+    const audio = new Audio(url);
 
-  const name = document.getElementById("name").value;
-  if (name) fd.append("name", name);
-
-  const res = await fetch("/api/voice", {
-    method: "POST",
-    body: fd
-  });
-
-  if (!res.ok) return restart();
-
-  const audioBlob = await res.blob();
-  if (audioBlob.size === 0) return restart();
-
-  const url = URL.createObjectURL(audioBlob);
-  const audio = new Audio(url);
-  currentAudio = audio;
-
-  isPlaying = true;
-
-  audio.onended = () => {
-    isPlaying = false;
-    if (isRunning) restart();
+    try {
+      await audio.play();
+      console.log("▶ 再生成功");
+    } catch (e) {
+      console.error("❌ 再生失敗", e);
+    }
   };
 
-  try {
-    await audio.play();
-    console.log("▶ 再生OK");
-  } catch (e) {
-    console.error("❌ 再生失敗", e);
-    isPlaying = false;
-    restart();
-  }
-}
+  mediaRecorder.start();
 
-// ===== ループ =====
-function restart() {
-  if (!isRunning) return;
-  startRecording();
-}
+  console.log("🎤 録音開始");
+
+  setTimeout(() => {
+    mediaRecorder.stop();
+    stream.getTracks().forEach(t => t.stop());
+    console.log("🛑 録音停止");
+  }, 3000);
+};
 </script>
 
 </body>
